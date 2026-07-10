@@ -27,6 +27,13 @@
 - Suggest context trimming when conversation grows large
 - Use efficient model routing for simple vs complex tasks
 
+### Semantic Answer Cache (CAP-5)
+Local `token-cache` MCP server — cached answers cost zero model tokens.
+- Call `cache_lookup` before re-answering a likely-repeated question
+- Reuse non-stale hits; verify stale ones (code changed since stored)
+- Call `cache_store` after reusable, self-contained answers (`scope: "durable"` if code-independent)
+- Never cache answers about uncommitted or actively changing code
+
 ## Constraints
 - Full verbosity for debugging sessions (need complete error context)
 - Full detail for architectural planning (need thorough analysis)

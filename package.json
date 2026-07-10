@@ -67,8 +67,8 @@
         "title": "AI Token Optimizer: Validate All Strategies"
       },
       {
-        "command": "aiTokenOptimizer.toggleAll",
-        "title": "AI Token Optimizer: Enable / Disable Plugin"
+        "command": "aiTokenOptimizer.clearCache",
+        "title": "AI Token Optimizer: Clear Semantic Cache"
       },
       {
         "command": "aiTokenOptimizer.validateIndex",
@@ -134,7 +134,8 @@
             "codeGraph": true,
             "outputCompression": true,
             "verbosityControl": true,
-            "sessionManagement": true
+            "sessionManagement": true,
+            "semanticCache": true
           },
           "properties": {
             "codeGraph": {
@@ -152,6 +153,10 @@
             "sessionManagement": {
               "type": "boolean",
               "description": "CAP-4: Session management and context hygiene"
+            },
+            "semanticCache": {
+              "type": "boolean",
+              "description": "CAP-5: Local semantic cache — serve repeated/similar questions from disk"
             }
           },
           "description": "Toggle individual strategies (used when profile is 'custom')."

@@ -14,7 +14,7 @@ export async function showProfilePicker(): Promise<void> {
   const items: vscode.QuickPickItem[] = [
     // Plugin toggle + validate at the top
     { label: enabledLabel, description: enabledDesc },
-    { label: '$(check-all) Validate All Strategies', description: 'Check CAP-1 through CAP-4 are working' },
+    { label: '$(check-all) Validate All Strategies', description: 'Check CAP-1 through CAP-5 are working' },
     { label: '', kind: vscode.QuickPickItemKind.Separator },
     // Profiles
     { label: PROFILE_DESCRIPTIONS.full,     description: config.profile === 'full'     ? '(active)' : '' },
@@ -100,6 +100,11 @@ async function showStrategyToggle(): Promise<void> {
       description: STRATEGY_DESCRIPTIONS.sessionManagement,
       picked: strategies.sessionManagement,
     },
+    {
+      label: `${strategies.semanticCache ? '$(check)' : '$(circle-large-outline)'} Semantic Cache`,
+      description: STRATEGY_DESCRIPTIONS.semanticCache,
+      picked: strategies.semanticCache,
+    },
   ];
 
   const selected = await vscode.window.showQuickPick(items, {
@@ -117,10 +122,11 @@ async function showStrategyToggle(): Promise<void> {
     outputCompression: selected.some(i => i.label.includes('Output Compression')),
     verbosityControl: selected.some(i => i.label.includes('Verbosity Control')),
     sessionManagement: selected.some(i => i.label.includes('Session Management')),
+    semanticCache: selected.some(i => i.label.includes('Semantic Cache')),
   };
 
   await updateStrategies(newStrategies);
   vscode.window.showInformationMessage(
-    `AI Token Optimizer: ${Object.values(newStrategies).filter(Boolean).length}/4 strategies active`
+    `AI Token Optimizer: ${Object.values(newStrategies).filter(Boolean).length}/5 strategies active`
   );
 }

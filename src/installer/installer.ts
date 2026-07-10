@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execSync, spawnSync } from 'child_process';
 import { TOOLS_TO_INSTALL, ToolInstallEntry } from '../constants';
+import { memoizeTtl } from '../cache/ttlCache';
 
 export interface InstallResult {
   packageName: string;
@@ -12,13 +13,17 @@ export interface InstallResult {
   error?: string;
 }
 
+// Each check is a blocking `which` (up to 3s) — memoized so validators and
+// dashboard refreshes don't repeatedly shell out for the same binary.
 export function isBinaryAvailable(bin: string): boolean {
-  try {
-    execSync(`which ${bin}`, { stdio: 'ignore', timeout: 3000 });
-    return true;
-  } catch {
-    return false;
-  }
+  return memoizeTtl(`which:${bin}`, 60_000, () => {
+    try {
+      execSync(`which ${bin}`, { stdio: 'ignore', timeout: 3000 });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**

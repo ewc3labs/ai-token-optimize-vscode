@@ -3,6 +3,10 @@ import { spawnSync } from 'child_process';
 import { StrategyState } from '../config';
 import { isBinaryAvailable } from '../installer/installer';
 import { getProjectsToIndex } from '../ui/projectPicker';
+import { memoizeTtl } from '../cache/ttlCache';
+import { SemanticCacheStore } from '../cache/store';
+
+const MEASURE_TTL_MS = 5 * 60_000;
 
 /**
  * Live measurements for the Savings Dashboard. Unlike the old static
@@ -49,6 +53,10 @@ export function measureRtk(strategies: StrategyState): Measurement {
     return { status: 'no-data', detail: 'No workspace folder open to benchmark against' };
   }
 
+  return memoizeTtl(`measure:rtk:${ws}`, MEASURE_TTL_MS, () => measureRtkLive(ws));
+}
+
+function measureRtkLive(ws: string): Measurement {
   const rawLs = run('ls', ['-la', ws]);
   const rtkLs = run('rtk', ['ls', ws]);
   const rawFind = run('find', [ws, '-maxdepth', '1', '-type', 'f']);
@@ -93,6 +101,11 @@ export function measureCodeGraph(strategies: StrategyState): Measurement {
     return { status: 'no-data', detail: 'No workspace folder open to inspect' };
   }
 
+  const cacheKey = `measure:codegraph:${projects.map(p => p.absPath).join(',')}`;
+  return memoizeTtl(cacheKey, MEASURE_TTL_MS, () => measureCodeGraphLive(projects));
+}
+
+function measureCodeGraphLive(projects: Array<{ name: string; absPath: string }>): Measurement {
   let totalFiles = 0, totalNodes = 0, totalEdges = 0, indexedCount = 0, staleCount = 0;
   for (const project of projects) {
     const result = run('codegraph', ['status'], project.absPath);
@@ -143,5 +156,32 @@ export function measureSession(strategies: StrategyState): Measurement {
   return {
     status: 'not-measurable',
     detail: 'Guidance for /compact, /clear and model routing — behavioral, not mechanical. Same limitation as CAP-3: only a live model A/B could measure this, and this extension cannot run one locally.',
+  };
+}
+
+/**
+ * CAP-5: real numbers straight from the cache file — entries, recorded hits,
+ * and tokens estimated from the actual cached answer sizes. Reported as
+ * 'measured' only once at least one hit has happened; never guessed.
+ */
+export function measureSemanticCache(strategies: StrategyState): Measurement {
+  if (!strategies.semanticCache) {
+    return { status: 'disabled', detail: 'Strategy disabled in current profile' };
+  }
+  const ws = primaryWorkspacePath();
+  if (!ws) {
+    return { status: 'no-data', detail: 'No workspace folder open' };
+  }
+
+  const stats = new SemanticCacheStore(ws).stats();
+  if (stats.entries === 0) {
+    return { status: 'no-data', detail: 'Cache empty — no answers stored yet. AI tools populate it via the token-cache MCP server as you work.' };
+  }
+  if (stats.totalHits === 0) {
+    return { status: 'no-data', detail: `${stats.entries} answer(s) cached, no repeat hits yet — savings appear when a question recurs.` };
+  }
+  return {
+    status: 'measured',
+    detail: `Real cache stats: ${stats.entries} entries, ${stats.totalHits} hits, ~${stats.estTokensSaved} tokens served from local disk instead of the model (estimated from actual cached answer sizes).`,
   };
 }

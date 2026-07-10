@@ -9,6 +9,7 @@ export interface StrategyState {
   outputCompression: boolean;
   verbosityControl: boolean;
   sessionManagement: boolean;
+  semanticCache: boolean;
 }
 
 export interface CodeGraphProject {
@@ -31,11 +32,11 @@ export interface ExtensionConfig {
 }
 
 const PROFILE_STRATEGIES: Record<Profile, StrategyState> = {
-  full: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: true },
-  debug: { codeGraph: true, outputCompression: false, verbosityControl: true, sessionManagement: true },
-  planning: { codeGraph: true, outputCompression: true, verbosityControl: false, sessionManagement: true },
-  review: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: false },
-  custom: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: true },
+  full: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: true, semanticCache: true },
+  debug: { codeGraph: true, outputCompression: false, verbosityControl: true, sessionManagement: true, semanticCache: true },
+  planning: { codeGraph: true, outputCompression: true, verbosityControl: false, sessionManagement: true, semanticCache: true },
+  review: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: false, semanticCache: true },
+  custom: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: true, semanticCache: true },
 };
 
 export function getConfig(): ExtensionConfig {

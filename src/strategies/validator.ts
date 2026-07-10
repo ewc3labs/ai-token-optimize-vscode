@@ -5,7 +5,8 @@ import { execSync, spawnSync } from 'child_process';
 import { getConfig, getEffectiveStrategies } from '../config';
 import { isBinaryAvailable } from '../installer/installer';
 import { getProjectsToIndex } from '../ui/projectPicker';
-import { COPILOT_INSTRUCTIONS_PATH, CLAUDE_INSTRUCTIONS_PATH, CODEX_INSTRUCTIONS_PATH, MARKER_START } from '../constants';
+import { COPILOT_INSTRUCTIONS_PATH, CLAUDE_INSTRUCTIONS_PATH, CODEX_INSTRUCTIONS_PATH, MARKER_START, MCP_CACHE_SERVER_NAME } from '../constants';
+import { SemanticCacheStore, CACHE_DIR, CACHE_FILE } from '../cache/store';
 
 // ─── result types ────────────────────────────────────────────────────────────
 
@@ -280,6 +281,77 @@ async function validateSession(): Promise<CategoryResult> {
   return { category: 'Session Management', cap: 'CAP-4', status, lines };
 }
 
+// ─── CAP-5: Semantic Cache ───────────────────────────────────────────────────
+
+async function validateSemanticCache(): Promise<CategoryResult> {
+  const config = getConfig();
+  const strategies = getEffectiveStrategies(config);
+  const lines: string[] = [];
+  let status: Status = 'ok';
+
+  if (!strategies.semanticCache) {
+    return { category: 'Semantic Cache', cap: 'CAP-5', status: 'disabled', lines: ['Strategy disabled in current profile'] };
+  }
+
+  const ws = wsPath();
+  if (!ws) {
+    return { category: 'Semantic Cache', cap: 'CAP-5', status: 'warn', lines: ['No workspace folder open'] };
+  }
+
+  // MCP server entry with a real bundle path on disk
+  const settingsPath = path.join(ws, '.vscode', 'settings.json');
+  let serverLine = `  ✗ MCP entry "${MCP_CACHE_SERVER_NAME}" missing from .vscode/settings.json — run "Configure MCP Servers"`;
+  let serverOk = false;
+  try {
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    const entry = settings?.mcp?.servers?.[MCP_CACHE_SERVER_NAME];
+    if (entry?.args?.[0]) {
+      if (fs.existsSync(entry.args[0])) {
+        serverLine = `  ✓ MCP server  : ${MCP_CACHE_SERVER_NAME} → ${entry.args[0]}`;
+        serverOk = true;
+      } else {
+        serverLine = `  ⚠ MCP server  : registered but bundle missing at ${entry.args[0]} — run "Configure MCP Servers"`;
+      }
+    }
+  } catch { /* missing/unparseable settings — reported below */ }
+  lines.push(serverLine);
+  if (!serverOk) { status = 'warn'; }
+
+  // Cache file state
+  const cacheFilePath = path.join(ws, CACHE_DIR, CACHE_FILE);
+  if (fs.existsSync(cacheFilePath)) {
+    try {
+      const stats = new SemanticCacheStore(ws).stats();
+      lines.push(`  ✓ Cache file  : ${stats.entries} entries, ${stats.totalHits} hits, ~${stats.estTokensSaved} tokens served from cache`);
+    } catch {
+      lines.push(`  ⚠ Cache file  : ${cacheFilePath} unreadable — will be recreated on next store`);
+    }
+  } else {
+    lines.push('  ○ Cache file  : empty — no queries cached yet');
+  }
+
+  // CAP-5 guidance present in instruction files
+  const checks = [
+    { rel: COPILOT_INSTRUCTIONS_PATH, label: 'Copilot' },
+    { rel: CLAUDE_INSTRUCTIONS_PATH,  label: 'Claude'  },
+    { rel: CODEX_INSTRUCTIONS_PATH,   label: 'Codex'   },
+  ];
+  for (const { rel, label } of checks) {
+    const { exists, hasSection } = checkInstructionFile(rel, 'CAP-5');
+    if (!exists) {
+      lines.push(`  ○ ${label.padEnd(8)}: ${rel} not found — run Regenerate`);
+      status = 'warn';
+    } else if (!hasSection) {
+      lines.push(`  ⚠ ${label.padEnd(8)}: file exists but CAP-5 section missing — run Regenerate`);
+      status = 'warn';
+    } else {
+      lines.push(`  ✓ ${label.padEnd(8)}: semantic cache rules injected`);
+    }
+  }
+
+  return { category: 'Semantic Cache', cap: 'CAP-5', status, lines };
+}
+
 // ─── main export ─────────────────────────────────────────────────────────────
 
 export async function validateAllStrategies(outputChannel: vscode.OutputChannel): Promise<void> {
@@ -305,7 +377,10 @@ export async function validateAllStrategies(outputChannel: vscode.OutputChannel)
       progress.report({ message: 'CAP-4: Session…' });
       const r4 = await validateSession();
 
-      return [r1, r2, r3, r4];
+      progress.report({ message: 'CAP-5: Semantic Cache…' });
+      const r5 = await validateSemanticCache();
+
+      return [r1, r2, r3, r4, r5];
     }
   );
 
@@ -345,8 +420,11 @@ export async function validateAllStrategies(outputChannel: vscode.OutputChannel)
       if (r.cap === 'CAP-2' && !isBinaryAvailable('rtk')) {
         fixes.push('Install RTK: brew install rtk');
       }
-      if ((r.cap === 'CAP-3' || r.cap === 'CAP-4') && r.lines.some(l => l.includes('not found') || l.includes('missing'))) {
+      if ((r.cap === 'CAP-3' || r.cap === 'CAP-4' || r.cap === 'CAP-5') && r.lines.some(l => l.includes('not found') || l.includes('missing'))) {
         fixes.push('Regenerate instruction files: run "AI Token Optimizer: Regenerate Instruction Files"');
+      }
+      if (r.cap === 'CAP-5' && r.lines.some(l => l.includes('Configure MCP Servers'))) {
+        fixes.push('Register the token-cache MCP server: run "AI Token Optimizer: Configure MCP Servers"');
       }
     }
   }
@@ -371,7 +449,7 @@ export async function validateAllStrategies(outputChannel: vscode.OutputChannel)
     if (!isBinaryAvailable('codegraph') || !isBinaryAvailable('rtk')) {
       actions.unshift('Install Tools');
     }
-    if (results.some(r => (r.status === 'warn' || r.status === 'error') && (r.cap === 'CAP-3' || r.cap === 'CAP-4'))) {
+    if (results.some(r => (r.status === 'warn' || r.status === 'error') && (r.cap === 'CAP-3' || r.cap === 'CAP-4' || r.cap === 'CAP-5'))) {
       actions.unshift('Regenerate');
     }
     const choice = await vscode.window.showWarningMessage(

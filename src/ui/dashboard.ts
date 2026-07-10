@@ -1,13 +1,14 @@
 import * as vscode from 'vscode';
 import { getConfig, getEffectiveStrategies, ExtensionConfig, StrategyState } from '../config';
 import { getDetectedTools } from '../generators';
-import { measureRtk, measureCodeGraph, measureVerbosity, measureSession, Measurement } from '../strategies';
+import { measureRtk, measureCodeGraph, measureVerbosity, measureSession, measureSemanticCache, Measurement } from '../strategies';
 
 interface DashboardMeasurements {
   codeGraph: Measurement;
   outputCompression: Measurement;
   verbosityControl: Measurement;
   sessionManagement: Measurement;
+  semanticCache: Measurement;
 }
 
 export class DashboardPanel {
@@ -61,6 +62,7 @@ export class DashboardPanel {
         outputCompression: measureRtk(strategies),
         verbosityControl: measureVerbosity(strategies),
         sessionManagement: measureSession(strategies),
+        semanticCache: measureSemanticCache(strategies),
       })
     );
 
@@ -206,13 +208,14 @@ export class DashboardPanel {
     ${this.strategyCard('Output Compression (CAP-2)', '📦', measurements.outputCompression)}
     ${this.strategyCard('Verbosity Control (CAP-3)', '🗣️', measurements.verbosityControl)}
     ${this.strategyCard('Session Management (CAP-4)', '🧹', measurements.sessionManagement)}
+    ${this.strategyCard('Semantic Cache (CAP-5)', '💾', measurements.semanticCache)}
   </div>
 
   <h2>Configuration</h2>
   <table>
     <tr><th>Setting</th><th>Value</th></tr>
     <tr><td>Active Profile</td><td><strong>${config.profile}</strong></td></tr>
-    <tr><td>Strategies Active</td><td>${activeCount} / 4</td></tr>
+    <tr><td>Strategies Active</td><td>${activeCount} / 5</td></tr>
     <tr><td>Verbosity Level</td><td>${config.verbosityLevel}</td></tr>
     <tr><td>Target Tools</td><td>${config.targetTools.join(', ')}</td></tr>
     <tr><td>Auto Apply</td><td>${config.autoApply ? 'Yes' : 'No'}</td></tr>

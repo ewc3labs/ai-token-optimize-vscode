@@ -64,7 +64,10 @@ export const STRATEGY_DESCRIPTIONS = {
   outputCompression: 'RTK output compression — compress CLI/log output before AI reads it',
   verbosityControl: 'Caveman response control — constrain AI response length',
   sessionManagement: 'Session management — audit context, clear sessions, route models',
+  semanticCache: 'Semantic cache — serve repeated/similar questions from local disk, zero tokens',
 };
+
+export const MCP_CACHE_SERVER_NAME = 'token-cache';
 
 export const PROFILE_DESCRIPTIONS: Record<string, string> = {
   full: '$(zap) Full Optimization — all strategies active',

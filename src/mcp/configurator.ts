@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isBinaryAvailable } from '../installer/installer';
+import { MCP_CACHE_SERVER_NAME } from '../constants';
 
 export interface McpServerConfig {
   command: string;
@@ -76,7 +77,7 @@ function detectProjectLanguages(workspacePath: string): string[] {
   return languages;
 }
 
-export async function configureMcpServers(outputChannel: vscode.OutputChannel): Promise<void> {
+export async function configureMcpServers(outputChannel: vscode.OutputChannel, extensionPath: string): Promise<void> {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) {
     outputChannel.appendLine('[mcp] No workspace folder — skipping MCP configuration');
@@ -88,13 +89,24 @@ export async function configureMcpServers(outputChannel: vscode.OutputChannel): 
   outputChannel.appendLine(`[mcp] Detected languages/frameworks: ${languages.join(', ') || 'none'}`);
 
   // Configure VS Code MCP settings for Copilot
-  await configureVsCodeMcp(wsPath, languages, outputChannel);
+  await configureVsCodeMcp(wsPath, languages, outputChannel, extensionPath);
 
   // Configure Claude Code MCP
-  await configureClaudeMcp(languages, outputChannel);
+  await configureClaudeMcp(languages, outputChannel, extensionPath, wsPath);
 }
 
-async function configureVsCodeMcp(wsPath: string, languages: string[], outputChannel: vscode.OutputChannel): Promise<void> {
+// The token-cache entry is always overwritten (not guarded like context7):
+// the extension install path is versioned, so a stale absolute path from a
+// previous version must be replaced on every activation.
+function cacheServerEntry(extensionPath: string, wsPath: string): Record<string, unknown> {
+  return {
+    command: 'node',
+    args: [path.join(extensionPath, 'dist', 'cache-server.js'), wsPath],
+    type: 'stdio',
+  };
+}
+
+async function configureVsCodeMcp(wsPath: string, languages: string[], outputChannel: vscode.OutputChannel, extensionPath: string): Promise<void> {
   const settingsPath = path.join(wsPath, '.vscode', 'settings.json');
   let settings: Record<string, unknown> = {};
 
@@ -141,12 +153,15 @@ async function configureVsCodeMcp(wsPath: string, languages: string[], outputCha
     outputChannel.appendLine('[mcp] Added CodeGraph MCP server (codegraph_explore tool)');
   }
 
+  mcpServers[MCP_CACHE_SERVER_NAME] = cacheServerEntry(extensionPath, wsPath);
+  outputChannel.appendLine('[mcp] Added token-cache MCP server (local semantic cache, CAP-5)');
+
   settings['mcp'] = { servers: mcpServers };
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
   outputChannel.appendLine('[mcp] Updated .vscode/settings.json with MCP configuration');
 }
 
-async function configureClaudeMcp(languages: string[], outputChannel: vscode.OutputChannel): Promise<void> {
+async function configureClaudeMcp(languages: string[], outputChannel: vscode.OutputChannel, extensionPath: string, wsPath: string): Promise<void> {
   const homedir = require('os').homedir();
   const claudeConfigDir = path.join(homedir, '.config', 'claude');
   const claudeConfigPath = path.join(claudeConfigDir, 'mcp.json');
@@ -191,6 +206,11 @@ async function configureClaudeMcp(languages: string[], outputChannel: vscode.Out
     };
     outputChannel.appendLine('[mcp] Added CodeGraph to Claude MCP config (codegraph_explore tool)');
   }
+
+  // Claude's mcp.json is global while the cache is per-workspace — the entry
+  // points at the last-activated workspace.
+  config.servers[MCP_CACHE_SERVER_NAME] = cacheServerEntry(extensionPath, wsPath) as unknown as McpServerConfig;
+  outputChannel.appendLine(`[mcp] Added token-cache to Claude MCP config (cache scoped to ${wsPath})`);
 
   fs.writeFileSync(claudeConfigPath, JSON.stringify(config, null, 2), 'utf-8');
   outputChannel.appendLine('[mcp] Updated Claude MCP configuration');

@@ -4,6 +4,7 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { getProjectsToIndex } from '../ui/projectPicker';
 import { isBinaryAvailable } from '../installer/installer';
+import { invalidateTtl } from '../cache/ttlCache';
 
 function isCodeGraphInstalled(): boolean {
   return isBinaryAvailable('codegraph');
@@ -128,6 +129,10 @@ export async function runCodeGraphReindex(outputChannel: vscode.OutputChannel): 
     }
   }
   pendingChangedFiles.clear();
+  if (succeeded > 0) {
+    // Index changed — drop memoized dashboard stats so fresh counts show immediately
+    invalidateTtl('measure:codegraph');
+  }
   updateIndexStatusBar(failed > 0 ? 'error' : 'fresh');
   outputChannel.appendLine(`[codegraph] Done — ${succeeded} ok, ${failed} failed`);
   if (failed > 0) { outputChannel.show(true); }
