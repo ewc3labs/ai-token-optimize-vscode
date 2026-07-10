@@ -1,0 +1,235 @@
+{
+  "name": "ai-token-optimizer",
+  "displayName": "AI Token Optimizer",
+  "description": "Automatically reduces token consumption for Claude Code, GitHub Copilot, and Codex by injecting optimized instructions, installing compression tools, and configuring MCP servers.",
+  "version": "0.1.0",
+  "publisher": "ai-token-optimizer",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "token",
+    "optimization",
+    "claude",
+    "copilot",
+    "codex",
+    "ai",
+    "cost",
+    "efficiency"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiTokenOptimizer.toggleAll",
+        "title": "AI Token Optimizer: Toggle All Strategies"
+      },
+      {
+        "command": "aiTokenOptimizer.selectProfile",
+        "title": "AI Token Optimizer: Select Optimization Profile"
+      },
+      {
+        "command": "aiTokenOptimizer.regenerateInstructions",
+        "title": "AI Token Optimizer: Regenerate Instruction Files"
+      },
+      {
+        "command": "aiTokenOptimizer.showDashboard",
+        "title": "AI Token Optimizer: Show Savings Dashboard"
+      },
+      {
+        "command": "aiTokenOptimizer.reindex",
+        "title": "AI Token Optimizer: Reindex CodeGraph"
+      },
+      {
+        "command": "aiTokenOptimizer.installTools",
+        "title": "AI Token Optimizer: Install Optimization Tools"
+      },
+      {
+        "command": "aiTokenOptimizer.configureMcp",
+        "title": "AI Token Optimizer: Configure MCP Servers"
+      },
+      {
+        "command": "aiTokenOptimizer.validateAll",
+        "title": "AI Token Optimizer: Validate All Strategies"
+      },
+      {
+        "command": "aiTokenOptimizer.toggleAll",
+        "title": "AI Token Optimizer: Enable / Disable Plugin"
+      },
+      {
+        "command": "aiTokenOptimizer.validateIndex",
+        "title": "AI Token Optimizer: Validate CodeGraph Index"
+      },
+      {
+        "command": "aiTokenOptimizer.manageProjects",
+        "title": "AI Token Optimizer: Manage CodeGraph Projects"
+      }
+    ],
+    "configuration": {
+      "title": "AI Token Optimizer",
+      "properties": {
+        "aiTokenOptimizer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable the AI Token Optimizer extension."
+        },
+        "aiTokenOptimizer.autoApply": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically generate/update instruction files when a workspace is opened."
+        },
+        "aiTokenOptimizer.targetTools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "copilot",
+              "claude",
+              "codex"
+            ]
+          },
+          "default": [
+            "copilot",
+            "claude",
+            "codex"
+          ],
+          "description": "Which AI tools to generate instruction files for."
+        },
+        "aiTokenOptimizer.profile": {
+          "type": "string",
+          "enum": [
+            "full",
+            "debug",
+            "planning",
+            "review",
+            "custom"
+          ],
+          "default": "full",
+          "description": "Active optimization profile. Profiles control which strategies are enabled.",
+          "enumDescriptions": [
+            "All strategies active — maximum token savings",
+            "Disables output compression (CAP-2) for full log visibility during debugging",
+            "Disables verbosity control (CAP-3) for response fidelity during planning",
+            "Disables session clearing (CAP-4) to preserve full context history during reviews",
+            "Use custom strategy combination from activeStrategies setting"
+          ]
+        },
+        "aiTokenOptimizer.activeStrategies": {
+          "type": "object",
+          "default": {
+            "codeGraph": true,
+            "outputCompression": true,
+            "verbosityControl": true,
+            "sessionManagement": true
+          },
+          "properties": {
+            "codeGraph": {
+              "type": "boolean",
+              "description": "CAP-1: CodeGraph pre-indexing for faster file discovery"
+            },
+            "outputCompression": {
+              "type": "boolean",
+              "description": "CAP-2: RTK output compression for CLI/log output"
+            },
+            "verbosityControl": {
+              "type": "boolean",
+              "description": "CAP-3: Caveman response verbosity control"
+            },
+            "sessionManagement": {
+              "type": "boolean",
+              "description": "CAP-4: Session management and context hygiene"
+            }
+          },
+          "description": "Toggle individual strategies (used when profile is 'custom')."
+        },
+        "aiTokenOptimizer.verbosityLevel": {
+          "type": "string",
+          "enum": [
+            "light",
+            "full",
+            "ultra"
+          ],
+          "default": "full",
+          "description": "Caveman verbosity reduction level. Light (~20%), Full (~35%), Ultra (~50%)."
+        },
+        "aiTokenOptimizer.preserveExistingInstructions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Preserve existing content in instruction files when updating."
+        },
+        "aiTokenOptimizer.autoInstallTools": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically install CodeGraph, RTK, and Caveman packages on activation."
+        },
+        "aiTokenOptimizer.configureMcpOnActivation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically configure MCP servers (Context7, CodeGraph) on activation."
+        },
+        "aiTokenOptimizer.codeGraphProjects": {
+          "type": "array",
+          "default": [],
+          "description": "Specific projects/folders to include in the CodeGraph index. If empty, all workspace folders are indexed.",
+          "items": {
+            "type": "object",
+            "required": ["name", "path", "enabled"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Display name for this project"
+              },
+              "path": {
+                "type": "string",
+                "description": "Absolute or workspace-relative path to the project root"
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Whether this project is actively indexed",
+                "default": true
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "compile": "tsc -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "node ./dist/test/runTest.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.56.0",
+    "glob": "^13.0.6",
+    "mocha": "^11.7.6",
+    "typescript": "^5.3.0"
+  }
+}

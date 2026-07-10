@@ -1,0 +1,91 @@
+import { MARKER_START, MARKER_END, MARKER_COMMENT } from '../constants';
+import { ExtensionConfig, StrategyState } from '../config';
+import { BaseGenerator } from './base';
+
+export class CopilotGenerator extends BaseGenerator {
+  protected getRelativePath(): string {
+    return '.github/copilot-instructions.md';
+  }
+
+  protected generateContent(strategies: StrategyState, config: ExtensionConfig): string {
+    const sections = this.buildSections(strategies, config);
+    const body = sections.join('\n\n');
+
+    return `# AI Token Optimization Guidelines
+
+${MARKER_START}
+${MARKER_COMMENT}
+
+## Token Efficiency Standards
+
+${body}
+
+## Task-Specific Overrides
+
+### For Debugging Tasks
+- Show full error messages and stack traces (do not summarize errors)
+- Include complete log output when diagnosing issues
+- Don't compress test failure details — show actual assertion errors
+
+### For Planning Tasks
+- Provide complete, detailed responses with full trade-off analysis
+- Include all relevant context for architectural decisions
+- Don't compress explanations of complex design choices
+
+### For Code Review
+- Reference all previously discussed files and decisions
+- Show complete diff context for suggested changes
+- Preserve full session context across the review
+
+${MARKER_END}
+`;
+  }
+
+  protected getCodeGraphSection(): string {
+    return `### Search Before Synthesize (CAP-1: CodeGraph)
+- Always search the codebase for existing implementations before generating new code
+- Use semantic search to find related patterns, utilities, and similar solutions
+- Reference existing code by file path instead of regenerating equivalent logic
+- When asked to implement a feature, first check if a similar pattern already exists
+- Prefer \`semantic_search\` and \`grep_search\` over reading entire files`;
+  }
+
+  protected getCompressionSection(): string {
+    return `### Concise Output (CAP-2: RTK Output Compression)
+RTK (github.com/rtk-ai/rtk) intercepts shell commands and compresses output by 60-90%.
+When RTK hook is active, commands rewrite automatically (git status → rtk git status).
+If not hooked, use RTK commands directly:
+  rtk git status / rtk git diff / rtk git log -n 10 / rtk git push
+  rtk cargo test / rtk pytest / rtk go test / rtk jest  (failures only, -90%)
+  rtk ls / rtk grep / rtk read / rtk tsc
+- Summarize test results: "43 passed, 2 failed" not individual test lines
+- For build output: report success/failure and error count, not full verbose logs
+- When showing file listings: rtk ls (tree format, omits node_modules and build artifacts)
+- Pipe CLI output through rtk when available`;
+  }
+
+  protected getVerbositySection(level: string): string {
+    const levelGuidance: Record<string, string> = {
+      light: '- Reduce response length by ~20%: trim obvious explanations but keep detail for complex logic',
+      full: '- Reduce response length by ~35%: use brief responses for routine changes, expand only for complex work',
+      ultra: '- Reduce response length by ~50%: maximum compression — show only code changes and minimal context',
+    };
+
+    return `### Response Verbosity Control (CAP-3: Caveman — ${level} mode)
+- Use brief, direct responses for straightforward code changes
+- Skip unnecessary introductions, conclusions, and framing
+- Don't repeat the question or restate what the user already knows
+- For simple fixes: show only the changed code, not the entire file
+- Use bullet points over paragraphs when listing multiple items
+${levelGuidance[level] || levelGuidance.full}`;
+  }
+
+  protected getSessionSection(): string {
+    return `### Context Management (CAP-4: Session Management)
+- When switching tasks, summarize the previous task state in 1-2 lines
+- Don't re-read files that were recently read in the same session
+- If context grows large, proactively suggest what can be dropped
+- For repetitive tasks (formatting, renaming), use the most efficient approach
+- Keep instruction compliance checks brief — don't quote full instructions back`;
+  }
+}

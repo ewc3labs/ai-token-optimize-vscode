@@ -1,0 +1,48 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+```bash
+npm install          # install dependencies
+npm run watch         # esbuild watch mode (continuous compilation to dist/extension.js)
+npm run build          # production build (minified, no sourcemaps)
+npm run compile        # tsc -p ./ — type-checks src/ and test/, emits to dist/ (required before npm test)
+npm run lint            # eslint src --ext ts
+npm run compile && npm test   # compile then run the VS Code integration test suite
+npm run package          # vsce package → produces the .vsix
+```
+
+There is no single-test filter — `npm test` runs `dist/test/suite/index.js` (Mocha, via `@vscode/test-electron`), which downloads/launches a VS Code instance and runs all suites in `test/suite/`. To iterate on one suite, temporarily narrow the `files` glob in [test/suite/index.ts](test/suite/index.ts) or `.only()` a `suite()`/`test()` block, then run `npm run compile && npm test`.
+
+Press **F5** in VS Code to launch the Extension Development Host for manual testing.
+
+## Architecture
+
+This is a VS Code extension (`src/extension.ts` is the bundled entry point, built with esbuild to `dist/extension.js`, `vscode` module externalized). It has **no runtime dependencies** — only devDependencies — so all logic is hand-written against Node's `fs`/`child_process` APIs and the `vscode` API.
+
+### What it does
+
+On workspace open (`onStartupFinished`), it writes token-optimization instructions into whichever AI tool config files are present/targeted, then optionally installs supporting CLI tools and wires MCP servers:
+
+1. **Generators** (`src/generators/`) write CAP-1–4 rules into `.github/copilot-instructions.md`, `CLAUDE.md`, and `.codex/instructions.md`.
+2. **Installer** (`src/installer/`) silently installs `@colbymchenry/codegraph` (npm, global) and `rtk` (brew/curl shell script, a Rust binary — **not** an npm package despite what older docs/tests may imply).
+3. **MCP configurator** (`src/mcp/configurator.ts`) writes `context7` and `codegraph` MCP server entries into `.vscode/settings.json` and `~/.config/claude/mcp.json`. It actively **deletes** any `rtk` MCP entry it finds, because RTK integrates via a Copilot PreToolUse hook, not MCP.
+4. **CodeGraph watcher** (`src/strategies/codegraph.ts`) watches source files per configured project, debounces 30s, then runs `codegraph init` (first time) or `codegraph sync` (incremental) and reflects status in the status bar.
+5. **Validator** (`src/strategies/validator.ts`) checks all four CAP strategies are actually configured/active and reports via the Output channel (`aiTokenOptimizer.validateAll`).
+
+Full data-flow/sequence diagrams for every one of the above live in [ARCHITECTURE.md](ARCHITECTURE.md) — read it before making non-trivial changes to activation, installer, MCP, or codegraph-watcher logic.
+
+### Key architectural rules to preserve
+
+- **Marker-based merge, not overwrite.** Instruction files are only ever modified between `<!-- AI-TOKEN-OPTIMIZER:START -->` / `<!-- AI-TOKEN-OPTIMIZER:END -->` markers (`src/generators/base.ts` `mergeContent`). User content outside the markers must never be touched. If markers are absent, the block is appended; if `preserveExistingInstructions` is false, the whole file is overwritten.
+- **Profiles gate strategies, not the other way around.** `full` / `debug` / `planning` / `review` / `custom` map to `{ codeGraph, outputCompression, verbosityControl, sessionManagement }` in `config.ts`. Debug disables output compression (need full logs), planning disables verbosity control (need full analysis), review disables session management (need full context history). Don't hardcode strategy behavior in generators — always go through `getEffectiveStrategies(profile)`.
+- **RTK is hooks, not MCP.** Never add an `rtk` entry to an MCP servers config; the configurator's job is partly to remove stray ones.
+- **CodeGraph install vs. MCP-expose are separate steps.** Installing the npm package puts the `codegraph` binary on `$PATH` (CLI). Adding the MCP server entry (`codegraph mcp` as a stdio subprocess) is what lets Copilot/Claude actually call `codegraph_explore`. Both must happen for AI tools to use it.
+- **Graceful degradation.** If `codegraph`/`rtk` binaries aren't installed, instruction files are still generated with CAP-1–4 guidance (telling the AI to invoke `rtk`/`codegraph` commands directly); nothing should hard-fail activation because a binary is missing.
+- **Per-project indexing.** `aiTokenOptimizer.codeGraphProjects` (array of `{ name, path, enabled }`) scopes which folders get indexed in multi-repo workspaces; empty means index all workspace folders.
+
+### Templates
+
+`templates/*.md` hold the raw markdown fragments (`claude-instructions.md`, `copilot-instructions.md`, `codex-instructions.md`) that generators assemble/inject — check these when changing wording of the CAP-1–4 guidance rather than hunting through generator code for inline strings.

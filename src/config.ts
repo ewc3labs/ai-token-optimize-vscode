@@ -1,0 +1,79 @@
+import * as vscode from 'vscode';
+
+export type Profile = 'full' | 'debug' | 'planning' | 'review' | 'custom';
+export type VerbosityLevel = 'light' | 'full' | 'ultra';
+export type TargetTool = 'copilot' | 'claude' | 'codex';
+
+export interface StrategyState {
+  codeGraph: boolean;
+  outputCompression: boolean;
+  verbosityControl: boolean;
+  sessionManagement: boolean;
+}
+
+export interface CodeGraphProject {
+  name: string;      // Display name shown in UI
+  path: string;      // Absolute or workspace-relative path
+  enabled: boolean;  // Whether this project is actively indexed
+}
+
+export interface ExtensionConfig {
+  enabled: boolean;
+  autoApply: boolean;
+  targetTools: TargetTool[];
+  profile: Profile;
+  activeStrategies: StrategyState;
+  verbosityLevel: VerbosityLevel;
+  preserveExistingInstructions: boolean;
+  autoInstallTools: boolean;
+  configureMcpOnActivation: boolean;
+  codeGraphProjects: CodeGraphProject[];
+}
+
+const PROFILE_STRATEGIES: Record<Profile, StrategyState> = {
+  full: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: true },
+  debug: { codeGraph: true, outputCompression: false, verbosityControl: true, sessionManagement: true },
+  planning: { codeGraph: true, outputCompression: true, verbosityControl: false, sessionManagement: true },
+  review: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: false },
+  custom: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: true },
+};
+
+export function getConfig(): ExtensionConfig {
+  const config = vscode.workspace.getConfiguration('aiTokenOptimizer');
+  return {
+    enabled: config.get<boolean>('enabled', true),
+    autoApply: config.get<boolean>('autoApply', true),
+    targetTools: config.get<TargetTool[]>('targetTools', ['copilot', 'claude', 'codex']),
+    profile: config.get<Profile>('profile', 'full'),
+    activeStrategies: config.get<StrategyState>('activeStrategies', PROFILE_STRATEGIES.full),
+    verbosityLevel: config.get<VerbosityLevel>('verbosityLevel', 'full'),
+    preserveExistingInstructions: config.get<boolean>('preserveExistingInstructions', true),
+    autoInstallTools: config.get<boolean>('autoInstallTools', true),
+    configureMcpOnActivation: config.get<boolean>('configureMcpOnActivation', true),
+    codeGraphProjects: config.get<CodeGraphProject[]>('codeGraphProjects', []),
+  };
+}
+
+export function getEffectiveStrategies(config: ExtensionConfig): StrategyState {
+  if (config.profile === 'custom') {
+    return config.activeStrategies;
+  }
+  return PROFILE_STRATEGIES[config.profile];
+}
+
+export async function updateProfile(profile: Profile): Promise<void> {
+  const config = vscode.workspace.getConfiguration('aiTokenOptimizer');
+  await config.update('profile', profile, vscode.ConfigurationTarget.Workspace);
+}
+
+export async function updateStrategies(strategies: Partial<StrategyState>): Promise<void> {
+  const config = vscode.workspace.getConfiguration('aiTokenOptimizer');
+  const current = config.get<StrategyState>('activeStrategies', PROFILE_STRATEGIES.full);
+  await config.update('activeStrategies', { ...current, ...strategies }, vscode.ConfigurationTarget.Workspace);
+  await config.update('profile', 'custom', vscode.ConfigurationTarget.Workspace);
+}
+
+export async function saveCodeGraphProjects(projects: CodeGraphProject[]): Promise<void> {
+  const config = vscode.workspace.getConfiguration('aiTokenOptimizer');
+  await config.update('codeGraphProjects', projects, vscode.ConfigurationTarget.Workspace);
+}
