@@ -9,9 +9,12 @@ import { showProfilePicker } from './ui/quickPick';
 import { DashboardPanel } from './ui/dashboard';
 import { startCodeGraphWatcher, runCodeGraphReindex, validateIndex, disposeCodeGraphWatcher, validateAllStrategies } from './strategies';
 import { SemanticCacheStore } from './cache/store';
+import { CallLogStore } from './cache/callLog';
+import { startSession } from './session/tracker';
 
 let outputChannel: vscode.OutputChannel;
 let extensionPath: string;
+let sessionStarted = false;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel('AI Token Optimizer');
@@ -24,6 +27,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     outputChannel.appendLine('[activate] Extension disabled via settings');
     return;
   }
+
+  initSessionTracking();
 
   // Register commands
   context.subscriptions.push(
@@ -66,6 +71,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   outputChannel.appendLine('[activate] AI Token Optimizer ready');
+}
+
+// Starts once per window — elapsed-session stats track from here, not from
+// a persisted log. Guarded so toggling the extension off/on mid-window
+// doesn't reset the clock a user already started watching.
+function initSessionTracking(): void {
+  if (sessionStarted) { return; }
+  sessionStarted = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const cacheSnapshot = ws ? new SemanticCacheStore(ws).stats() : null;
+  const callCountsSnapshot = ws ? new CallLogStore(ws).counts() : null;
+  startSession(cacheSnapshot, Date.now, callCountsSnapshot);
 }
 
 async function autoApply(config: ReturnType<typeof getConfig>): Promise<void> {
@@ -126,6 +143,7 @@ async function toggleAllCommand(): Promise<void> {
   );
 
   if (newEnabled) {
+    initSessionTracking();
     await autoApply(getConfig());
   }
 }

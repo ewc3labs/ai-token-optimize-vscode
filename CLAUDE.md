@@ -78,6 +78,15 @@ If not hooked, prefix commands manually: `rtk git status`, `rtk pytest`, etc.
 - When CLAUDE.md exceeds 10k tokens, suggest splitting into focused sections
 - Proactively suggest clearing context when token count is high
 
+### Semantic Answer Cache (CAP-5: token-cache MCP)
+A local `token-cache` MCP server caches answers on disk — cache hits cost zero model tokens.
+- Before answering a question you may have answered before in this workspace, call `cache_lookup` with the question
+- If `hit` is true and `stale` is false, reuse the cached answer and note it came from cache
+- If `stale` is true, the code changed since it was stored — verify before reusing
+- After producing a reusable, self-contained answer (concept explanations, architecture summaries, how-to steps), call `cache_store`
+- Use `scope: "durable"` for answers independent of current code state
+- Do NOT cache answers about uncommitted or actively changing code
+
 ## Task-Type Routing
 
 ### Lightweight Tasks (use lighter model via /model)

@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import { getConfig, getEffectiveStrategies, ExtensionConfig, StrategyState } from '../config';
 import { getDetectedTools } from '../generators';
-import { measureRtk, measureCodeGraph, measureVerbosity, measureSession, measureSemanticCache, Measurement } from '../strategies';
+import { measureRtk, measureCodeGraph, measureVerbosity, measureSession, measureSemanticCache, measureCacheCalls, Measurement } from '../strategies';
+import { getSessionSummary, formatDuration, SessionSummary } from '../session/tracker';
+import { SemanticCacheStore } from '../cache/store';
+import { CallLogStore } from '../cache/callLog';
+
+const REFRESH_COMMAND = 'aiTokenOptimizer.showDashboard';
 
 interface DashboardMeasurements {
   codeGraph: Measurement;
@@ -9,6 +14,7 @@ interface DashboardMeasurements {
   verbosityControl: Measurement;
   sessionManagement: Measurement;
   semanticCache: Measurement;
+  cacheCalls: Measurement;
 }
 
 export class DashboardPanel {
@@ -32,7 +38,7 @@ export class DashboardPanel {
       'aiTokenOptimizerDashboard',
       'Token Optimization Dashboard',
       vscode.ViewColumn.One,
-      { enableScripts: false }
+      { enableScripts: false, enableCommandUris: [REFRESH_COMMAND] }
     );
 
     DashboardPanel.currentPanel = new DashboardPanel(panel);
@@ -63,11 +69,17 @@ export class DashboardPanel {
         verbosityControl: measureVerbosity(strategies),
         sessionManagement: measureSession(strategies),
         semanticCache: measureSemanticCache(strategies),
+        cacheCalls: measureCacheCalls(strategies),
       })
     );
 
+    const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const currentCacheStats = ws ? new SemanticCacheStore(ws).stats() : null;
+    const currentCallCounts = ws ? new CallLogStore(ws).counts() : null;
+    const session = getSessionSummary(currentCacheStats, Date.now, currentCallCounts);
+
     if (this.panel !== DashboardPanel.currentPanel?.panel) { return; } // disposed while measuring
-    this.panel.webview.html = this.getHtmlContent(config, strategies, measurements);
+    this.panel.webview.html = this.getHtmlContent(config, strategies, measurements, session);
   }
 
   private getLoadingContent(): string {
@@ -111,7 +123,7 @@ export class DashboardPanel {
     </div>`;
   }
 
-  private getHtmlContent(config: ExtensionConfig, strategies: StrategyState, measurements: DashboardMeasurements): string {
+  private getHtmlContent(config: ExtensionConfig, strategies: StrategyState, measurements: DashboardMeasurements, session: SessionSummary): string {
     const detectedTools = getDetectedTools();
     const activeCount = Object.values(strategies).filter(Boolean).length;
 
@@ -138,11 +150,11 @@ export class DashboardPanel {
     }
     h1 { color: var(--vscode-foreground, #ffffff); margin-bottom: 8px; }
     h2 { color: var(--vscode-foreground, #ffffff); margin-top: 24px; border-bottom: 1px solid var(--vscode-panel-border, #444); padding-bottom: 8px; }
+    .summary-row { display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
     .summary-card {
       background: var(--vscode-editor-inactiveSelectionBackground, #264f78);
       border-radius: 8px;
       padding: 16px 24px;
-      margin: 16px 0;
       display: inline-block;
     }
     .summary-card .number {
@@ -190,16 +202,25 @@ export class DashboardPanel {
     table { width: 100%; border-collapse: collapse; margin: 12px 0; }
     th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border, #333); }
     th { opacity: 0.7; font-weight: 600; }
+    .refresh-link { font-size: 14px; font-weight: normal; margin-left: 12px; color: var(--vscode-textLink-foreground, #3794ff); text-decoration: none; }
+    .refresh-link:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
-  <h1>⚡ Token Optimization Dashboard</h1>
-  <p>Live measurements against this workspace, run just now. Strategies without a mechanical way to measure them are labeled instead of guessed.</p>
+  <h1>⚡ Token Optimization Dashboard <a class="refresh-link" href="command:${REFRESH_COMMAND}">↻ Refresh</a></h1>
+  <p>Measurements against this workspace, refreshed just now. Strategies without a mechanical way to measure them are labeled instead of guessed.</p>
 
-  <div class="summary-card">
-    <div class="number">${headlineText}</div>
-    <div class="label">Average of measured strategies</div>
-    <div class="sublabel">${measuredPercents.length}/2 measurable strategies produced a number this run — CAP-3/CAP-4 are behavioral, see below</div>
+  <div class="summary-row">
+    <div class="summary-card">
+      <div class="number">${headlineText}</div>
+      <div class="label">RTK savings (CAP-2) — lifetime</div>
+      <div class="sublabel">From rtk's own log ('rtk gain --project'), this workspace, all-time — not a live benchmark. Tracks CLI output compression only, not LLM tokens or model choice. CodeGraph (CAP-1) reports real index stats instead of a %; CAP-3/CAP-4 are behavioral, not mechanically measurable — see cards below.</div>
+    </div>
+    <div class="summary-card">
+      <div class="number">${formatDuration(session.elapsedMs)}</div>
+      <div class="label">Elapsed this session</div>
+      <div class="sublabel">${session.cacheHitsThisSession} semantic-cache hit(s), ~${session.tokensSavedThisSession} tokens served from cache, ${session.mcpLookupsThisSession} MCP call(s) (${session.mcpHitsThisSession} hit / ${session.mcpMissesThisSession} miss), ${session.reindexCount} CodeGraph reindex(es) — since this VS Code window opened, resets on reload</div>
+    </div>
   </div>
 
   <h2>Strategy Performance</h2>
@@ -209,6 +230,7 @@ export class DashboardPanel {
     ${this.strategyCard('Verbosity Control (CAP-3)', '🗣️', measurements.verbosityControl)}
     ${this.strategyCard('Session Management (CAP-4)', '🧹', measurements.sessionManagement)}
     ${this.strategyCard('Semantic Cache (CAP-5)', '💾', measurements.semanticCache)}
+    ${this.strategyCard('MCP Tool Calls (token-cache)', '🔌', measurements.cacheCalls)}
   </div>
 
   <h2>Configuration</h2>
@@ -229,9 +251,9 @@ export class DashboardPanel {
   </p>
 
   <p style="opacity: 0.5; font-size: 12px; margin-top: 24px;">
-    Re-run <code>Ctrl+Shift+P → AI Token Optimizer: Show Savings Dashboard</code> any time to re-measure —
-    every number above comes from a real command executed against this workspace when the panel opened,
-    not a fixed estimate.
+    Click "↻ Refresh" above (or re-run <code>Ctrl+Shift+P → AI Token Optimizer: Show Savings Dashboard</code>) any time to re-measure —
+    every number above is read fresh from real local state (rtk's own log, the semantic-cache file, CodeGraph's index, this window's session counters)
+    when the panel loads, not a fixed estimate.
   </p>
 </body>
 </html>`;

@@ -3,6 +3,7 @@
 // vscode. stdout carries only newline-delimited JSON-RPC 2.0; logs go to stderr.
 import * as readline from 'readline';
 import { SemanticCacheStore, CacheScope } from '../cache/store';
+import { CallLogStore } from '../cache/callLog';
 
 const SERVER_NAME = 'token-cache';
 const SERVER_VERSION = '0.1.0';
@@ -62,12 +63,15 @@ const TOOL_DEFINITIONS = [
 // coherent with the extension (e.g. after a clearCache command).
 function callTool(name: string, args: Record<string, unknown>): unknown {
   const store = new SemanticCacheStore(workspaceRoot);
+  const callLog = new CallLogStore(workspaceRoot);
   switch (name) {
     case 'cache_lookup': {
       if (typeof args.query !== 'string' || args.query.length === 0) {
         throw new Error('cache_lookup requires a non-empty "query" string');
       }
-      return store.lookup(args.query);
+      const result = store.lookup(args.query);
+      callLog.recordLookup(result);
+      return result;
     }
     case 'cache_store': {
       if (typeof args.query !== 'string' || typeof args.answer !== 'string') {
@@ -75,6 +79,7 @@ function callTool(name: string, args: Record<string, unknown>): unknown {
       }
       const scope: CacheScope = args.scope === 'durable' ? 'durable' : 'code';
       const entry = store.store(args.query, args.answer, scope);
+      callLog.recordStore();
       return { stored: true, id: entry.id, scope: entry.scope };
     }
     case 'cache_stats':

@@ -317,6 +317,27 @@ async function validateSemanticCache(): Promise<CategoryResult> {
   lines.push(serverLine);
   if (!serverOk) { status = 'warn'; }
 
+  // Claude Code reads MCP servers from ~/.claude.json (projects[ws].mcpServers),
+  // not .vscode/settings.json — a separate, easy-to-miss wiring check. A pass
+  // here only means Copilot can see the tool, not that Claude Code can too.
+  const claudeConfigPath = path.join(require('os').homedir(), '.claude.json');
+  let claudeServerLine = `  ✗ MCP entry "${MCP_CACHE_SERVER_NAME}" missing from ~/.claude.json — run "Configure MCP Servers"`;
+  let claudeServerOk = false;
+  try {
+    const claudeConfig = JSON.parse(fs.readFileSync(claudeConfigPath, 'utf-8'));
+    const entry = claudeConfig?.projects?.[ws]?.mcpServers?.[MCP_CACHE_SERVER_NAME];
+    if (entry?.args?.[0]) {
+      if (fs.existsSync(entry.args[0])) {
+        claudeServerLine = `  ✓ Claude MCP  : ${MCP_CACHE_SERVER_NAME} → ${entry.args[0]}`;
+        claudeServerOk = true;
+      } else {
+        claudeServerLine = `  ⚠ Claude MCP  : registered but bundle missing at ${entry.args[0]} — run "Configure MCP Servers"`;
+      }
+    }
+  } catch { /* missing/unparseable ~/.claude.json — reported below */ }
+  lines.push(claudeServerLine);
+  if (!claudeServerOk) { status = 'warn'; }
+
   // Cache file state
   const cacheFilePath = path.join(ws, CACHE_DIR, CACHE_FILE);
   if (fs.existsSync(cacheFilePath)) {
