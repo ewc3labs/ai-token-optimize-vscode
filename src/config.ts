@@ -29,6 +29,7 @@ export interface ExtensionConfig {
   autoInstallTools: boolean;
   configureMcpOnActivation: boolean;
   codeGraphProjects: CodeGraphProject[];
+  telemetryEnabled: boolean;
 }
 
 const PROFILE_STRATEGIES: Record<Profile, StrategyState> = {
@@ -52,6 +53,7 @@ export function getConfig(): ExtensionConfig {
     autoInstallTools: config.get<boolean>('autoInstallTools', true),
     configureMcpOnActivation: config.get<boolean>('configureMcpOnActivation', true),
     codeGraphProjects: config.get<CodeGraphProject[]>('codeGraphProjects', []),
+    telemetryEnabled: config.get<boolean>('telemetry.enabled', true),
   };
 }
 

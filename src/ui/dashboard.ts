@@ -5,8 +5,27 @@ import { measureRtk, measureCodeGraph, measureVerbosity, measureSession, measure
 import { getSessionSummary, formatDuration, SessionSummary } from '../session/tracker';
 import { SemanticCacheStore } from '../cache/store';
 import { CallLogStore } from '../cache/callLog';
+import { getProjectsToIndex } from './projectPicker';
+import {
+  collectRepositoryTelemetry,
+  rate,
+  Rating,
+  RatingBand,
+  RepositoryMetrics,
+  RepositoryTelemetry,
+  SavingsEstimate,
+  TelemetryStore,
+  summarizeWindow,
+  repositoriesInHistory,
+  sparklineSvg,
+  WINDOWS,
+  WindowSummary,
+  MetricKey,
+} from '../telemetry';
+import { HistoryRow } from '../telemetry';
 
 const REFRESH_COMMAND = 'aiTokenOptimizer.showDashboard';
+const EXPORT_COMMAND = 'aiTokenOptimizer.exportTelemetry';
 
 interface DashboardMeasurements {
   codeGraph: Measurement;
@@ -38,7 +57,7 @@ export class DashboardPanel {
       'aiTokenOptimizerDashboard',
       'Token Optimization Dashboard',
       vscode.ViewColumn.One,
-      { enableScripts: false, enableCommandUris: [REFRESH_COMMAND] }
+      { enableScripts: false, enableCommandUris: [REFRESH_COMMAND, EXPORT_COMMAND] }
     );
 
     DashboardPanel.currentPanel = new DashboardPanel(panel);
@@ -78,8 +97,18 @@ export class DashboardPanel {
     const currentCallCounts = ws ? new CallLogStore(ws).counts() : null;
     const session = getSessionSummary(currentCacheStats, Date.now, currentCallCounts);
 
+    const telemetry = ws
+      ? await collectRepositoryTelemetry(
+          { workspaceRoot: ws, projects: getProjectsToIndex(), now: Date.now },
+          undefined,
+          () => config.telemetryEnabled,
+        )
+      : null;
+    // Read after collect so the just-captured snapshot is included in the trend.
+    const history = ws ? new TelemetryStore(ws).readHistory() : [];
+
     if (this.panel !== DashboardPanel.currentPanel?.panel) { return; } // disposed while measuring
-    this.panel.webview.html = this.getHtmlContent(config, strategies, measurements, session);
+    this.panel.webview.html = this.getHtmlContent(config, strategies, measurements, session, telemetry, history);
   }
 
   private getLoadingContent(): string {
@@ -123,7 +152,154 @@ export class DashboardPanel {
     </div>`;
   }
 
-  private getHtmlContent(config: ExtensionConfig, strategies: StrategyState, measurements: DashboardMeasurements, session: SessionSummary): string {
+  // --- Repository Intelligence (Tier A: real) + Estimated Savings (Tier B: modeled) ---
+
+  private static readonly INDICATOR: Record<Rating, string> = {
+    excellent: '🟢 Excellent',
+    good: '🟡 Good',
+    'needs-improvement': '🔴 Needs Improvement',
+  };
+
+  /** A metric cell with an optional color-coded rating chip. */
+  private metricCell(label: string, value: string, rating?: Rating): string {
+    const chip = rating ? `<span class="ind ind-${rating}">${DashboardPanel.INDICATOR[rating]}</span>` : '';
+    return `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div>${chip}</div>`;
+  }
+
+  private num(n: number): string {
+    return n.toLocaleString();
+  }
+
+  /** null → an explicit, honest "n/a" rather than a fabricated 0. */
+  private obs(n: number | null): string {
+    return n === null ? '<span class="na">n/a</span>' : this.num(n);
+  }
+
+  private formatBytes(bytes: number): string {
+    if (bytes <= 0) { return '0 B'; }
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+    return `${Math.round((bytes / Math.pow(1024, i)) * 10) / 10} ${units[i]}`;
+  }
+
+  private repositorySection(repo: RepositoryMetrics, estimate: SavingsEstimate): string {
+    const tokenBand: RatingBand = { excellentAtLeast: 80, goodAtLeast: 50 };
+    const filesBand: RatingBand = { excellentAtLeast: 90, goodAtLeast: 60 };
+    const tokenRating = rate(estimate.tokenReductionPercent, tokenBand);
+    const filesRating = rate(estimate.filesReductionPercent, filesBand);
+
+    const langs = Object.entries(repo.languages)
+      .sort((a, b) => b[1] - a[1])
+      .map(([l, c]) => `<span class="tool-badge">${l} · ${c}</span>`)
+      .join(' ') || '<em>n/a</em>';
+
+    const a = estimate.assumptions;
+
+    return `
+    <h3 class="repo-title">📦 ${repo.repositoryName}</h3>
+    <p class="repo-source">Read from the CodeGraph index (${repo.source === 'sqlite' ? 'full breakdown' : 'totals only — sqlite3 unavailable'}). These are real index facts, not estimates.</p>
+    <div class="metric-grid">
+      ${this.metricCell('Files', this.num(repo.totalFiles))}
+      ${this.metricCell('Directories', this.num(repo.totalDirectories))}
+      ${this.metricCell('Classes', this.num(repo.totalClasses))}
+      ${this.metricCell('Interfaces', this.num(repo.totalInterfaces))}
+      ${this.metricCell('Enums', this.num(repo.totalEnums))}
+      ${this.metricCell('Methods', this.num(repo.totalMethods))}
+      ${this.metricCell('Functions', this.num(repo.totalFunctions))}
+      ${this.metricCell('Graph Nodes', this.num(repo.totalGraphNodes))}
+      ${this.metricCell('Relationships', this.num(repo.totalGraphRelationships))}
+      ${this.metricCell('Source Size', this.formatBytes(repo.sourceBytes))}
+      ${this.metricCell('Index Size', this.formatBytes(repo.indexSizeBytes))}
+      ${this.metricCell('Packages', this.obs(repo.totalPackages))}
+      ${this.metricCell('APIs', this.obs(repo.totalApis))}
+      ${this.metricCell('DB Queries', this.obs(repo.totalDatabaseQueries))}
+      ${this.metricCell('Build Time', repo.graphBuildTimeMs === null ? '<span class="na">n/a</span>' : `${repo.graphBuildTimeMs} ms`)}
+    </div>
+    <p class="repo-langs">${langs}</p>
+
+    <div class="modeled-banner">⚠️ Estimated savings below are a <strong>model</strong>, not a measurement. This extension is not in the LLM request path, so real per-request token counts can't be observed. Assumptions: whole-repository baseline, ~${a.avgFilesRetrievedPerQuery} files retrieved/query, ${a.charsPerToken} chars/token, $${a.usdPer1kPromptTokens}/1K prompt tokens.</p>
+    <div class="metric-grid">
+      ${this.metricCell('Prompt Tokens (no graph)', this.num(estimate.estimatedPromptTokensWithoutGraph))}
+      ${this.metricCell('Prompt Tokens (graph)', this.num(estimate.estimatedPromptTokensWithGraph))}
+      ${this.metricCell('Token Reduction', `${estimate.tokenReductionPercent}%`, tokenRating)}
+      ${this.metricCell('Files Reduction', `${estimate.filesReductionPercent}%`, filesRating)}
+      ${this.metricCell('Context (no graph)', `${estimate.estimatedContextKbWithoutGraph} KB`)}
+      ${this.metricCell('Context (graph)', `${estimate.estimatedContextKbWithGraph} KB`)}
+      ${this.metricCell('Est. Cost (no graph)', `$${estimate.estimatedCostWithoutGraphUsd.toFixed(4)}`)}
+      ${this.metricCell('Est. Cost Saved / query', `$${estimate.estimatedCostSavedUsd.toFixed(4)}`)}
+    </div>`;
+  }
+
+  private repositoryIntelligenceHtml(telemetry: RepositoryTelemetry | null): string {
+    if (!telemetry) {
+      return '';
+    }
+    if (telemetry.snapshot.status !== 'ok') {
+      return `<h2>Repository Intelligence</h2><p class="detail">${telemetry.snapshot.detail}</p>`;
+    }
+    const repos = telemetry.snapshot.data ?? [];
+    const sections = repos.map((r, i) => this.repositorySection(r, telemetry.estimates[i])).join('\n<hr class="repo-sep">\n');
+    return `<h2>Repository Intelligence <span class="section-note">real index facts + modeled savings</span></h2>\n${sections}`;
+  }
+
+  // --- Repository Growth (Tier A historical: real index snapshots over time) ---
+
+  private static readonly GROWTH_METRICS: { key: MetricKey; label: string }[] = [
+    { key: 'files', label: 'Files' },
+    { key: 'nodes', label: 'Graph Nodes' },
+    { key: 'edges', label: 'Relationships' },
+    { key: 'methods', label: 'Methods' },
+    { key: 'functions', label: 'Functions' },
+    { key: 'indexBytes', label: 'Index Size' },
+  ];
+
+  private trendCard(summary: WindowSummary, key: MetricKey, label: string): string {
+    const t = summary.trends[key];
+    const spark = sparklineSvg(t.series, { width: 180, height: 40 });
+    const deltaSign = t.delta > 0 ? '+' : '';
+    const deltaPct = t.deltaPercent === null ? '' : ` (${deltaSign}${t.deltaPercent}%)`;
+    const deltaClass = t.delta > 0 ? 'up' : t.delta < 0 ? 'down' : 'flat';
+    const latest = key === 'indexBytes' ? this.formatBytes(t.latest) : this.num(t.latest);
+    const delta = key === 'indexBytes' ? this.formatBytes(Math.abs(t.delta)) : this.num(Math.abs(t.delta));
+    return `
+    <div class="trend-card">
+      <div class="trend-head"><span class="trend-label">${label}</span><span class="trend-latest">${latest}</span></div>
+      <div class="spark">${spark}</div>
+      <div class="trend-delta ${deltaClass}">${t.delta === 0 ? 'no change' : `${deltaSign}${delta}${deltaPct}`} · ${summary.sampleCount} sample(s)</div>
+    </div>`;
+  }
+
+  private growthSection(history: HistoryRow[]): string {
+    if (history.length === 0) {
+      return '';
+    }
+    const repos = repositoriesInHistory(history);
+    // Default to the widest useful window that actually has multiple samples.
+    const blocks = repos.map((repo) => {
+      const lifetime = summarizeWindow(history, repo, 'lifetime', Date.now());
+      if (lifetime.sampleCount < 2) {
+        return `<h3 class="repo-title">📈 ${repo}</h3><p class="detail">Only ${lifetime.sampleCount} snapshot so far — trends appear once the dashboard has been opened at least twice (each open captures one snapshot).</p>`;
+      }
+      const cards = DashboardPanel.GROWTH_METRICS.map((m) => this.trendCard(lifetime, m.key, m.label)).join('\n');
+      const windowRows = WINDOWS.map((w) => {
+        const s = summarizeWindow(history, repo, w.key, Date.now());
+        const files = s.trends.files;
+        const nodes = s.trends.nodes;
+        return `<tr><td>${w.label}</td><td>${s.sampleCount}</td><td>${files.delta >= 0 ? '+' : ''}${this.num(files.delta)}</td><td>${nodes.delta >= 0 ? '+' : ''}${this.num(nodes.delta)}</td></tr>`;
+      }).join('');
+      return `
+      <h3 class="repo-title">📈 ${repo} <span class="section-note">lifetime trend</span></h3>
+      <div class="trend-grid">${cards}</div>
+      <table class="window-table">
+        <tr><th>Window</th><th>Snapshots</th><th>Δ Files</th><th>Δ Nodes</th></tr>
+        ${windowRows}
+      </table>`;
+    }).join('\n<hr class="repo-sep">\n');
+
+    return `<h2>Repository Growth <span class="section-note">real index snapshots over time</span></h2>\n${blocks}`;
+  }
+
+  private getHtmlContent(config: ExtensionConfig, strategies: StrategyState, measurements: DashboardMeasurements, session: SessionSummary, telemetry: RepositoryTelemetry | null, history: HistoryRow[]): string {
     const detectedTools = getDetectedTools();
     const activeCount = Object.values(strategies).filter(Boolean).length;
 
@@ -204,10 +380,45 @@ export class DashboardPanel {
     th { opacity: 0.7; font-weight: 600; }
     .refresh-link { font-size: 14px; font-weight: normal; margin-left: 12px; color: var(--vscode-textLink-foreground, #3794ff); text-decoration: none; }
     .refresh-link:hover { text-decoration: underline; }
+    .section-note { font-size: 12px; font-weight: normal; opacity: 0.6; }
+    .repo-title { margin: 20px 0 2px; font-size: 16px; }
+    .repo-source { font-size: 11.5px; opacity: 0.7; margin: 0 0 12px; }
+    .repo-langs { margin: 10px 0 4px; }
+    .repo-sep { border: none; border-top: 1px solid var(--vscode-panel-border, #333); margin: 24px 0; }
+    .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 10px 0; }
+    .metric {
+      background: var(--vscode-editor-inactiveSelectionBackground, #2a2d2e);
+      border-radius: 6px; padding: 10px 12px;
+    }
+    .metric-label { font-size: 11px; opacity: 0.7; }
+    .metric-value { font-size: 20px; font-weight: bold; margin-top: 2px; color: var(--vscode-foreground, #fff); }
+    .na { opacity: 0.45; font-weight: normal; font-size: 15px; }
+    .ind { display: inline-block; font-size: 10px; font-weight: 700; margin-top: 6px; padding: 1px 6px; border-radius: 100px; }
+    .ind-excellent { background: rgba(78, 201, 176, 0.18); color: var(--vscode-charts-green, #4ec9b0); }
+    .ind-good { background: rgba(229, 192, 123, 0.18); color: var(--vscode-charts-yellow, #e5c07b); }
+    .ind-needs-improvement { background: rgba(241, 76, 76, 0.15); color: var(--vscode-charts-red, #f14c4c); }
+    .modeled-banner {
+      background: rgba(229, 192, 123, 0.10);
+      border-left: 3px solid var(--vscode-charts-yellow, #e5c07b);
+      border-radius: 4px; padding: 10px 14px; margin: 18px 0 6px; font-size: 12px; line-height: 1.5;
+    }
+    .trend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 12px 0; }
+    .trend-card { background: var(--vscode-editor-inactiveSelectionBackground, #2a2d2e); border-radius: 6px; padding: 12px; }
+    .trend-head { display: flex; justify-content: space-between; align-items: baseline; }
+    .trend-label { font-size: 12px; opacity: 0.75; }
+    .trend-latest { font-size: 18px; font-weight: bold; color: var(--vscode-foreground, #fff); }
+    .spark { margin: 6px 0 4px; }
+    .spark svg { display: block; width: 100%; height: 40px; }
+    .trend-delta { font-size: 11px; opacity: 0.8; }
+    .trend-delta.up { color: var(--vscode-charts-green, #4ec9b0); }
+    .trend-delta.down { color: var(--vscode-charts-red, #f14c4c); }
+    .trend-delta.flat { opacity: 0.55; }
+    .window-table { width: auto; margin: 12px 0; font-size: 12.5px; }
+    .window-table td, .window-table th { padding: 5px 16px 5px 0; border: none; }
   </style>
 </head>
 <body>
-  <h1>⚡ Token Optimization Dashboard <a class="refresh-link" href="command:${REFRESH_COMMAND}">↻ Refresh</a></h1>
+  <h1>⚡ Token Optimization Dashboard <a class="refresh-link" href="command:${REFRESH_COMMAND}">↻ Refresh</a><a class="refresh-link" href="command:${EXPORT_COMMAND}">⬇ Export</a></h1>
   <p>Measurements against this workspace, refreshed just now. Strategies without a mechanical way to measure them are labeled instead of guessed.</p>
 
   <div class="summary-row">
@@ -232,6 +443,10 @@ export class DashboardPanel {
     ${this.strategyCard('Semantic Cache (CAP-5)', '💾', measurements.semanticCache)}
     ${this.strategyCard('MCP Tool Calls (token-cache)', '🔌', measurements.cacheCalls)}
   </div>
+
+  ${this.repositoryIntelligenceHtml(telemetry)}
+
+  ${this.growthSection(history)}
 
   <h2>Configuration</h2>
   <table>

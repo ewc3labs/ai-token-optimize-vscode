@@ -7,6 +7,7 @@ import { configureMcpServers } from './mcp';
 import { createStatusBar, updateStatusBar, disposeStatusBar } from './ui/statusBar';
 import { showProfilePicker } from './ui/quickPick';
 import { DashboardPanel } from './ui/dashboard';
+import { exportTelemetryCommand } from './ui/exportTelemetry';
 import { startCodeGraphWatcher, runCodeGraphReindex, validateIndex, disposeCodeGraphWatcher, validateAllStrategies } from './strategies';
 import { SemanticCacheStore } from './cache/store';
 import { CallLogStore } from './cache/callLog';
@@ -43,6 +44,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('aiTokenOptimizer.configureMcp', () => configureMcpServers(outputChannel, extensionPath)),
     vscode.commands.registerCommand('aiTokenOptimizer.validateAll', () => validateAllStrategies(outputChannel)),
     vscode.commands.registerCommand('aiTokenOptimizer.clearCache', clearCacheCommand),
+    vscode.commands.registerCommand('aiTokenOptimizer.exportTelemetry', () => exportTelemetryCommand(outputChannel)),
   );
 
   // Create status bar

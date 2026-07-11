@@ -17,8 +17,11 @@ const STOPWORDS = new Set([
 ]);
 
 // Minimum content tokens for fuzzy matching. Below this, only exact key
-// matches count — two-token queries share tokens too easily.
-export const MIN_FUZZY_TOKENS = 3;
+// matches count. Floor is 2, not 1 — a single shared content token already
+// forces Jaccard to 1.0 regardless of topic ("cache" alone would fuzzy-match
+// every cache-related question), so 1-token queries stay exact-only. At 2+
+// tokens the Jaccard/cosine thresholds below do the real discriminating work.
+export const MIN_FUZZY_TOKENS = 2;
 
 // Tuned together: Jaccard ≥ 0.5 already demands half the unique tokens be
 // shared, so cosine mainly rejects share-one-rare-token cases. 0.7 lets a

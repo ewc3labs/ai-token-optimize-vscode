@@ -77,6 +77,10 @@
       {
         "command": "aiTokenOptimizer.manageProjects",
         "title": "AI Token Optimizer: Manage CodeGraph Projects"
+      },
+      {
+        "command": "aiTokenOptimizer.exportTelemetry",
+        "title": "AI Token Optimizer: Export Telemetry (JSON/CSV/Markdown)"
       }
     ],
     "configuration": {
@@ -209,6 +213,11 @@
               }
             }
           }
+        },
+        "aiTokenOptimizer.telemetry.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Collect repository intelligence metrics from the CodeGraph index and show them (with a modeled savings estimate) in the dashboard."
         }
       }
     }

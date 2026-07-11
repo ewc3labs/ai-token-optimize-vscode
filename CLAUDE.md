@@ -31,8 +31,13 @@ On workspace open (`onStartupFinished`), it writes token-optimization instructio
 3. **MCP configurator** (`src/mcp/configurator.ts`) writes `context7` and `codegraph` MCP server entries into `.vscode/settings.json` and `~/.config/claude/mcp.json`. It actively **deletes** any `rtk` MCP entry it finds, because RTK integrates via a Copilot PreToolUse hook, not MCP.
 4. **CodeGraph watcher** (`src/strategies/codegraph.ts`) watches source files per configured project, debounces 30s, then runs `codegraph init` (first time) or `codegraph sync` (incremental) and reflects status in the status bar.
 5. **Validator** (`src/strategies/validator.ts`) checks all four CAP strategies are actually configured/active and reports via the Output channel (`aiTokenOptimizer.validateAll`).
+6. **Telemetry** (`src/telemetry/`) is a pluggable metric-collector layer surfaced in the dashboard. `RepositoryMetricsCollector` reads real structural facts (files, classes, interfaces, methods, functions, nodes, edges, languages, index size) straight from `.codegraph/codegraph.db` via the `sqlite3` CLI, falling back to `codegraph status` totals when sqlite3 is absent. `estimator.ts` layers a **modeled** savings estimate on top (whole-repo baseline vs. graph-scoped slice); it is always tagged `modeled: true` and labeled as an estimate in the UI. `TelemetryStore` persists a latest snapshot + append-only history (`history.jsonl`) under `.aicache/telemetry/`. `analytics.ts` windows that history (24h/7d/30d/lifetime) into real repository-growth trends; `sparkline.ts` renders them as static inline SVG (the webview has scripts disabled); `export.ts` serializes to JSON/CSV/Markdown (no Excel/PDF — those need forbidden runtime deps; CSV opens in Excel). The `aiTokenOptimizer.exportTelemetry` command drives export.
 
 Full data-flow/sequence diagrams for every one of the above live in [ARCHITECTURE.md](ARCHITECTURE.md) — read it before making non-trivial changes to activation, installer, MCP, or codegraph-watcher logic.
+
+### Observability honesty rule
+
+This extension is **not in the LLM request path** — the actual model call and CodeGraph retrieval happen inside Copilot/Claude Code/Codex, which it cannot instrument. So per-request LLM metrics (prompt/completion tokens, latency, cost) and per-query retrieval metrics are **not observable** here and must never be fabricated. `src/strategies/measurement.ts` and the telemetry layer both follow this: real numbers are read from local state; unobservable ones are reported as `null`/`n/a`; and anything derived from assumptions is tagged `modeled` and labeled as an estimate. Preserve this distinction — do not turn an estimate into a number that reads as measured.
 
 ### Key architectural rules to preserve
 

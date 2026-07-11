@@ -33,12 +33,13 @@
 
 ### Semantic Answer Cache (CAP-5: token-cache MCP)
 A local `token-cache` MCP server caches answers on disk — cache hits cost zero model tokens.
-- Before answering a question you may have answered before in this workspace, call `cache_lookup` with the question
-- If `hit` is true and `stale` is false, reuse the cached answer and note it came from cache
-- If `stale` is true, the code changed since it was stored — verify before reusing
-- After producing a reusable, self-contained answer, call `cache_store`
-- Use `scope: "durable"` for answers independent of current code state
-- Do NOT cache answers about uncommitted or actively changing code
+- MANDATORY FIRST STEP for any explanatory/conceptual question ("what is X", "how does X work", "why was X built") — call `cache_lookup` with the question BEFORE reading files, grepping, calling codegraph, or spawning a subagent. Do not decide first whether it "seems" repeated — always check; the check itself is nearly free.
+- This applies even when you're about to delegate the research to a subagent/Task tool — check the cache yourself in the main thread first, because a subagent starts with a fresh context and no access to this MCP server, so it can never check or populate the cache on your behalf.
+- If `hit` is true and `stale` is false, reuse the cached answer and note it came from cache — skip further tool calls entirely.
+- If `stale` is true, the code changed since it was stored — verify before reusing.
+- After producing a reusable, self-contained answer (including one assembled from subagent output), call `cache_store` with the original question and the final answer.
+- Use `scope: "durable"` for answers independent of current code state.
+- Do NOT cache answers about uncommitted or actively changing code.
 
 ## Task-Type Routing
 

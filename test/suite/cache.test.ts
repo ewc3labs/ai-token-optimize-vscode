@@ -72,10 +72,26 @@ suite('Semantic Cache (CAP-5)', () => {
       assert.strictEqual(isMatch(a, b, idf), false);
     });
 
-    test('short queries never fuzzy-match', () => {
+    test('single-token queries never fuzzy-match', () => {
       const { normalizeQuery, buildIdf, isMatch } = require('../../src/cache/similarity');
-      const a = normalizeQuery('clear cache');
-      const b = normalizeQuery('cache clear');
+      const a = normalizeQuery('cache');
+      const b = normalizeQuery('caching');
+      const idf = buildIdf([a, b]);
+      assert.strictEqual(isMatch(a, b, idf), false);
+    });
+
+    test('two-token queries can fuzzy-match when topically related', () => {
+      const { normalizeQuery, buildIdf, isMatch } = require('../../src/cache/similarity');
+      const a = normalizeQuery('vscode extension');
+      const b = normalizeQuery('how does this vscode extension work');
+      const idf = buildIdf([a, b]);
+      assert.strictEqual(isMatch(a, b, idf), true);
+    });
+
+    test('two-token queries on different topics do not fuzzy-match', () => {
+      const { normalizeQuery, buildIdf, isMatch } = require('../../src/cache/similarity');
+      const a = normalizeQuery('vscode extension');
+      const b = normalizeQuery('install tools');
       const idf = buildIdf([a, b]);
       assert.strictEqual(isMatch(a, b, idf), false);
     });
