@@ -7,13 +7,20 @@ import { configureMcpServers } from './mcp';
 import { createStatusBar, updateStatusBar, disposeStatusBar } from './ui/statusBar';
 import { showProfilePicker } from './ui/quickPick';
 import { DashboardPanel } from './ui/dashboard';
+import { exportTelemetryCommand } from './ui/exportTelemetry';
 import { startCodeGraphWatcher, runCodeGraphReindex, validateIndex, disposeCodeGraphWatcher, validateAllStrategies } from './strategies';
+import { SemanticCacheStore } from './cache/store';
+import { CallLogStore } from './cache/callLog';
+import { startSession } from './session/tracker';
 
 let outputChannel: vscode.OutputChannel;
+let extensionPath: string;
+let sessionStarted = false;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel('AI Token Optimizer');
   outputChannel.appendLine('[activate] AI Token Optimizer starting...');
+  extensionPath = context.extensionPath;
 
   const config = getConfig();
 
@@ -21,6 +28,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     outputChannel.appendLine('[activate] Extension disabled via settings');
     return;
   }
+
+  initSessionTracking();
 
   // Register commands
   context.subscriptions.push(
@@ -32,8 +41,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('aiTokenOptimizer.validateIndex', () => validateIndex(outputChannel)),
     vscode.commands.registerCommand('aiTokenOptimizer.installTools', () => installAllTools(outputChannel)),
     vscode.commands.registerCommand('aiTokenOptimizer.manageProjects', () => showProjectPicker(outputChannel)),
-    vscode.commands.registerCommand('aiTokenOptimizer.configureMcp', () => configureMcpServers(outputChannel)),
+    vscode.commands.registerCommand('aiTokenOptimizer.configureMcp', () => configureMcpServers(outputChannel, extensionPath)),
     vscode.commands.registerCommand('aiTokenOptimizer.validateAll', () => validateAllStrategies(outputChannel)),
+    vscode.commands.registerCommand('aiTokenOptimizer.clearCache', clearCacheCommand),
+    vscode.commands.registerCommand('aiTokenOptimizer.exportTelemetry', () => exportTelemetryCommand(outputChannel)),
   );
 
   // Create status bar
@@ -62,6 +73,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   outputChannel.appendLine('[activate] AI Token Optimizer ready');
+}
+
+// Starts once per window — elapsed-session stats track from here, not from
+// a persisted log. Guarded so toggling the extension off/on mid-window
+// doesn't reset the clock a user already started watching.
+function initSessionTracking(): void {
+  if (sessionStarted) { return; }
+  sessionStarted = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const cacheSnapshot = ws ? new SemanticCacheStore(ws).stats() : null;
+  const callCountsSnapshot = ws ? new CallLogStore(ws).counts() : null;
+  startSession(cacheSnapshot, Date.now, callCountsSnapshot);
 }
 
 async function autoApply(config: ReturnType<typeof getConfig>): Promise<void> {
@@ -102,7 +125,7 @@ async function autoApply(config: ReturnType<typeof getConfig>): Promise<void> {
   // 3. Configure MCP servers
   if (config.configureMcpOnActivation) {
     try {
-      await configureMcpServers(outputChannel);
+      await configureMcpServers(outputChannel, extensionPath);
     } catch (err) {
       outputChannel.appendLine(`[auto-apply] MCP configuration failed: ${err}`);
     }
@@ -122,6 +145,7 @@ async function toggleAllCommand(): Promise<void> {
   );
 
   if (newEnabled) {
+    initSessionTracking();
     await autoApply(getConfig());
   }
 }
@@ -135,6 +159,19 @@ async function regenerateCommand(): Promise<void> {
   vscode.window.showInformationMessage(
     `AI Token Optimizer: Regenerated ${count} instruction files`
   );
+}
+
+async function clearCacheCommand(): Promise<void> {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders) {
+    vscode.window.showWarningMessage('AI Token Optimizer: No workspace folder open');
+    return;
+  }
+  const store = new SemanticCacheStore(workspaceFolders[0].uri.fsPath);
+  const stats = store.stats();
+  store.clear();
+  outputChannel.appendLine(`[cache] Cleared semantic cache (${stats.entries} entries, ${stats.totalHits} lifetime hits)`);
+  vscode.window.showInformationMessage(`AI Token Optimizer: Semantic cache cleared (${stats.entries} entries removed)`);
 }
 
 async function onConfigChanged(): Promise<void> {

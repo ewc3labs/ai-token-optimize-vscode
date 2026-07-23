@@ -2,15 +2,12 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isBinaryAvailable } from '../installer/installer';
+import { MCP_CACHE_SERVER_NAME } from '../constants';
 
 export interface McpServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
-}
-
-export interface McpConfig {
-  servers: Record<string, McpServerConfig>;
 }
 
 export function detectExistingMcpConfig(workspacePath: string): { vscode: boolean; claude: boolean } {
@@ -34,7 +31,7 @@ function hasVsCodeMcpConfig(workspacePath: string): boolean {
 
 function hasClaudeMcpConfig(): boolean {
   const homedir = require('os').homedir();
-  const claudeConfigPath = path.join(homedir, '.config', 'claude', 'mcp.json');
+  const claudeConfigPath = path.join(homedir, '.claude.json');
   return fs.existsSync(claudeConfigPath);
 }
 
@@ -76,7 +73,7 @@ function detectProjectLanguages(workspacePath: string): string[] {
   return languages;
 }
 
-export async function configureMcpServers(outputChannel: vscode.OutputChannel): Promise<void> {
+export async function configureMcpServers(outputChannel: vscode.OutputChannel, extensionPath: string): Promise<void> {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) {
     outputChannel.appendLine('[mcp] No workspace folder — skipping MCP configuration');
@@ -88,13 +85,24 @@ export async function configureMcpServers(outputChannel: vscode.OutputChannel): 
   outputChannel.appendLine(`[mcp] Detected languages/frameworks: ${languages.join(', ') || 'none'}`);
 
   // Configure VS Code MCP settings for Copilot
-  await configureVsCodeMcp(wsPath, languages, outputChannel);
+  await configureVsCodeMcp(wsPath, languages, outputChannel, extensionPath);
 
   // Configure Claude Code MCP
-  await configureClaudeMcp(languages, outputChannel);
+  await configureClaudeMcp(languages, outputChannel, extensionPath, wsPath);
 }
 
-async function configureVsCodeMcp(wsPath: string, languages: string[], outputChannel: vscode.OutputChannel): Promise<void> {
+// The token-cache entry is always overwritten (not guarded like context7):
+// the extension install path is versioned, so a stale absolute path from a
+// previous version must be replaced on every activation.
+function cacheServerEntry(extensionPath: string, wsPath: string): Record<string, unknown> {
+  return {
+    command: 'node',
+    args: [path.join(extensionPath, 'dist', 'cache-server.js'), wsPath],
+    type: 'stdio',
+  };
+}
+
+async function configureVsCodeMcp(wsPath: string, languages: string[], outputChannel: vscode.OutputChannel, extensionPath: string): Promise<void> {
   const settingsPath = path.join(wsPath, '.vscode', 'settings.json');
   let settings: Record<string, unknown> = {};
 
@@ -141,42 +149,55 @@ async function configureVsCodeMcp(wsPath: string, languages: string[], outputCha
     outputChannel.appendLine('[mcp] Added CodeGraph MCP server (codegraph_explore tool)');
   }
 
+  mcpServers[MCP_CACHE_SERVER_NAME] = cacheServerEntry(extensionPath, wsPath);
+  outputChannel.appendLine('[mcp] Added token-cache MCP server (local semantic cache, CAP-5)');
+
   settings['mcp'] = { servers: mcpServers };
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
   outputChannel.appendLine('[mcp] Updated .vscode/settings.json with MCP configuration');
 }
 
-async function configureClaudeMcp(languages: string[], outputChannel: vscode.OutputChannel): Promise<void> {
-  const homedir = require('os').homedir();
-  const claudeConfigDir = path.join(homedir, '.config', 'claude');
-  const claudeConfigPath = path.join(claudeConfigDir, 'mcp.json');
-
-  let config: McpConfig = { servers: {} };
-
-  if (fs.existsSync(claudeConfigPath)) {
-    try {
-      config = JSON.parse(fs.readFileSync(claudeConfigPath, 'utf-8'));
-      if (!config.servers) {
-        config.servers = {};
-      }
-    } catch {
-      outputChannel.appendLine('[mcp] Could not parse Claude MCP config — creating fresh');
-    }
-  } else {
-    if (!fs.existsSync(claudeConfigDir)) {
-      fs.mkdirSync(claudeConfigDir, { recursive: true });
-    }
+// Claude Code CLI does NOT read ~/.config/claude/mcp.json — it reads
+// ~/.claude.json, with per-project server entries under projects[wsPath].mcpServers.
+// (Confirmed by inspecting a live ~/.claude.json: project entries already have
+// an mcpServers key, and servers registered only in ~/.config/claude/mcp.json
+// never show up as available tools in a Claude Code session.) Writing here
+// also fixes the "global mcp.json + per-workspace cache path" mismatch noted
+// below: each project gets its own entry instead of the last-activated
+// workspace clobbering every other project's token-cache path.
+export async function configureClaudeMcp(
+  languages: string[],
+  outputChannel: vscode.OutputChannel,
+  extensionPath: string,
+  wsPath: string,
+  claudeConfigPath: string = path.join(require('os').homedir(), '.claude.json'),
+): Promise<void> {
+  if (!fs.existsSync(claudeConfigPath)) {
+    outputChannel.appendLine('[mcp] ~/.claude.json not found — skipping Claude Code MCP configuration');
+    return;
   }
 
+  let root: Record<string, unknown>;
+  try {
+    root = JSON.parse(fs.readFileSync(claudeConfigPath, 'utf-8'));
+  } catch {
+    outputChannel.appendLine('[mcp] Could not parse ~/.claude.json — skipping Claude Code MCP configuration');
+    return;
+  }
+
+  const projects = (root['projects'] as Record<string, Record<string, unknown>>) || {};
+  const project = projects[wsPath] || {};
+  const servers = (project['mcpServers'] as Record<string, McpServerConfig>) || {};
+
   // RTK uses a PreToolUse hook (not MCP) — remove any stale rtk MCP entry
-  if ('rtk' in config.servers) {
-    delete config.servers['rtk'];
+  if ('rtk' in servers) {
+    delete servers['rtk'];
     outputChannel.appendLine('[mcp] Removed stale rtk MCP entry from Claude config');
   }
 
   // Add Context7
-  if (!config.servers['context7']) {
-    config.servers['context7'] = {
+  if (!servers['context7']) {
+    servers['context7'] = {
       command: 'npx',
       args: ['-y', '@context7/mcp-server'],
     };
@@ -184,14 +205,21 @@ async function configureClaudeMcp(languages: string[], outputChannel: vscode.Out
   }
 
   // Add CodeGraph if installed
-  if (isBinaryAvailable('codegraph') && !config.servers['codegraph']) {
-    config.servers['codegraph'] = {
+  if (isBinaryAvailable('codegraph') && !servers['codegraph']) {
+    servers['codegraph'] = {
       command: 'codegraph',
       args: ['mcp'],
     };
     outputChannel.appendLine('[mcp] Added CodeGraph to Claude MCP config (codegraph_explore tool)');
   }
 
-  fs.writeFileSync(claudeConfigPath, JSON.stringify(config, null, 2), 'utf-8');
-  outputChannel.appendLine('[mcp] Updated Claude MCP configuration');
+  servers[MCP_CACHE_SERVER_NAME] = cacheServerEntry(extensionPath, wsPath) as unknown as McpServerConfig;
+  outputChannel.appendLine(`[mcp] Added token-cache to Claude MCP config (project-scoped to ${wsPath})`);
+
+  project['mcpServers'] = servers;
+  projects[wsPath] = project;
+  root['projects'] = projects;
+
+  fs.writeFileSync(claudeConfigPath, JSON.stringify(root, null, 2), 'utf-8');
+  outputChannel.appendLine('[mcp] Updated ~/.claude.json with project-scoped MCP configuration');
 }

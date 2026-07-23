@@ -87,6 +87,9 @@ export abstract class BaseGenerator {
     if (strategies.sessionManagement) {
       sections.push(this.getSessionSection());
     }
+    if (strategies.semanticCache) {
+      sections.push(this.getCacheSection());
+    }
 
     return sections;
   }
@@ -95,4 +98,5 @@ export abstract class BaseGenerator {
   protected abstract getCompressionSection(): string;
   protected abstract getVerbositySection(level: string): string;
   protected abstract getSessionSection(): string;
+  protected abstract getCacheSection(): string;
 }

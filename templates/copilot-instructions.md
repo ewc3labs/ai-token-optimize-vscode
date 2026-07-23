@@ -32,6 +32,16 @@
 - For repetitive tasks (formatting, renaming), use the most efficient model available
 - Keep instruction compliance checks brief — don't quote the full instruction back
 
+### Semantic Answer Cache (CAP-5: token-cache MCP)
+A local `token-cache` MCP server caches answers on disk — cache hits cost zero model tokens.
+- MANDATORY FIRST STEP for explanatory/conceptual questions — call `cache_lookup` with the question BEFORE searching, reading files, or delegating to any agent. Don't pre-judge whether it was likely asked before; always check first.
+- Check the cache yourself before delegating research to a subagent — subagents start with fresh context and cannot see or populate this cache.
+- If `hit` is true and `stale` is false, reuse the cached answer and note it came from cache — skip further tool calls.
+- If `stale` is true, the code changed since it was stored — verify before reusing.
+- After producing a reusable, self-contained answer, call `cache_store`.
+- Use `scope: "durable"` for answers independent of current code state.
+- Do NOT cache answers about uncommitted or actively changing code.
+
 ## Task-Specific Guidelines
 
 ### For Debugging Tasks

@@ -3,6 +3,12 @@ import { spawnSync } from 'child_process';
 import { StrategyState } from '../config';
 import { isBinaryAvailable } from '../installer/installer';
 import { getProjectsToIndex } from '../ui/projectPicker';
+import { memoizeTtl } from '../cache/ttlCache';
+import { SemanticCacheStore } from '../cache/store';
+import { CallLogStore } from '../cache/callLog';
+import { getRtkGain } from './rtkGain';
+
+const MEASURE_TTL_MS = 5 * 60_000;
 
 /**
  * Live measurements for the Savings Dashboard. Unlike the old static
@@ -32,10 +38,12 @@ function primaryWorkspacePath(): string | undefined {
 }
 
 /**
- * CAP-2: run the same two read-only, bounded commands raw and through `rtk`
- * on this workspace, and diff the actual byte counts. Bounded to maxdepth 1
- * so it stays fast and safe regardless of repo size (never descends into
- * node_modules — only lists it as a single, unexpanded entry).
+ * CAP-2: real, locally-persisted savings from `rtk gain --format json --all
+ * --project` — rtk's own accumulated log of commands it has actually
+ * compressed for this workspace, lifetime. Replaces an earlier synthetic
+ * 'ls'/'find' live-diff benchmark that re-ran fresh on every dashboard open
+ * and had no relationship to real usage (that number was the source of
+ * confusion — a single -87% with nothing behind it).
  */
 export function measureRtk(strategies: StrategyState): Measurement {
   if (!strategies.outputCompression) {
@@ -49,26 +57,22 @@ export function measureRtk(strategies: StrategyState): Measurement {
     return { status: 'no-data', detail: 'No workspace folder open to benchmark against' };
   }
 
-  const rawLs = run('ls', ['-la', ws]);
-  const rtkLs = run('rtk', ['ls', ws]);
-  const rawFind = run('find', [ws, '-maxdepth', '1', '-type', 'f']);
-  const rtkFind = run('rtk', ['find', ws, '-maxdepth', '1', '-type', 'f']);
+  return memoizeTtl(`measure:rtk:${ws}`, MEASURE_TTL_MS, () => measureRtkLive(ws));
+}
 
-  const pairs: Array<{ raw: string; opt: string }> = [];
-  if (rawLs.ok && rtkLs.ok && rawLs.out.length > 0) { pairs.push({ raw: rawLs.out, opt: rtkLs.out }); }
-  if (rawFind.ok && rtkFind.ok && rawFind.out.length > 0) { pairs.push({ raw: rawFind.out, opt: rtkFind.out }); }
-
-  if (pairs.length === 0) {
-    return { status: 'no-data', detail: 'Live benchmark commands did not complete — try again or check the Output panel' };
+function measureRtkLive(ws: string): Measurement {
+  const result = getRtkGain(ws);
+  if (result.status === 'no-data') {
+    return { status: 'no-data', detail: result.detail };
   }
-
-  const reductions = pairs.map(p => (1 - p.opt.length / p.raw.length) * 100);
-  const avg = reductions.reduce((a, b) => a + b, 0) / reductions.length;
-
+  if (result.status === 'error') {
+    return { status: 'unavailable', detail: result.detail };
+  }
+  const s = result.summary!;
   return {
     status: 'measured',
-    percent: Math.round(avg),
-    detail: `Live benchmark, this workspace: 'ls -la' + 'find -maxdepth 1', raw vs. via rtk, byte-for-byte (${pairs.length}/2 commands compared). Reduction varies by command — a verbose grep can see 0%, a directory listing can see 80%+.`,
+    percent: Math.round(s.avgSavingsPct),
+    detail: `Lifetime, this workspace (rtk gain --project): ${s.totalCommands} command(s), ${s.totalSavedTokens} tokens saved of ${s.totalInputTokens} sent (${s.avgSavingsPct.toFixed(1)}%). Tracks RTK CLI output compression only — not LLM conversation tokens or model choice.`,
   };
 }
 
@@ -93,6 +97,11 @@ export function measureCodeGraph(strategies: StrategyState): Measurement {
     return { status: 'no-data', detail: 'No workspace folder open to inspect' };
   }
 
+  const cacheKey = `measure:codegraph:${projects.map(p => p.absPath).join(',')}`;
+  return memoizeTtl(cacheKey, MEASURE_TTL_MS, () => measureCodeGraphLive(projects));
+}
+
+function measureCodeGraphLive(projects: Array<{ name: string; absPath: string }>): Measurement {
   let totalFiles = 0, totalNodes = 0, totalEdges = 0, indexedCount = 0, staleCount = 0;
   for (const project of projects) {
     const result = run('codegraph', ['status'], project.absPath);
@@ -115,7 +124,7 @@ export function measureCodeGraph(strategies: StrategyState): Measurement {
   const freshness = staleCount === 0 ? 'up to date' : `${staleCount}/${indexedCount} project(s) stale — reindex recommended`;
   return {
     status: 'measured',
-    detail: `Real index (queried now): ${totalFiles} files, ${totalNodes} symbols, ${totalEdges} edges across ${indexedCount}/${projects.length} project(s) — ${freshness}. Task-dependent in practice: a targeted "find callers" query measured 32% fewer bytes than grep; a broad "explore" query measured 2.6x more, since it pulls related files for context. No single percentage is honest here — the index stats above are what's real for this workspace right now.`,
+    detail: `Real index state (queried now): ${totalFiles} files, ${totalNodes} symbols, ${totalEdges} edges across ${indexedCount}/${projects.length} project(s) — ${freshness}. This is index state, not a savings percentage — CodeGraph exposes no per-query metrics locally (no query log or invocation history is persisted anywhere on disk), so a real "% saved" number for CodeGraph cannot be shown here without fabricating it.`,
   };
 }
 
@@ -143,5 +152,57 @@ export function measureSession(strategies: StrategyState): Measurement {
   return {
     status: 'not-measurable',
     detail: 'Guidance for /compact, /clear and model routing — behavioral, not mechanical. Same limitation as CAP-3: only a live model A/B could measure this, and this extension cannot run one locally.',
+  };
+}
+
+/**
+ * CAP-5: real numbers straight from the cache file — entries, recorded hits,
+ * and tokens estimated from the actual cached answer sizes. Reported as
+ * 'measured' only once at least one hit has happened; never guessed.
+ */
+export function measureSemanticCache(strategies: StrategyState): Measurement {
+  if (!strategies.semanticCache) {
+    return { status: 'disabled', detail: 'Strategy disabled in current profile' };
+  }
+  const ws = primaryWorkspacePath();
+  if (!ws) {
+    return { status: 'no-data', detail: 'No workspace folder open' };
+  }
+
+  const stats = new SemanticCacheStore(ws).stats();
+  if (stats.entries === 0) {
+    return { status: 'no-data', detail: 'Cache empty — no answers stored yet. AI tools populate it via the token-cache MCP server as you work.' };
+  }
+  if (stats.totalHits === 0) {
+    return { status: 'no-data', detail: `${stats.entries} answer(s) cached, no repeat hits yet — savings appear when a question recurs.` };
+  }
+  return {
+    status: 'measured',
+    detail: `Real cache stats: ${stats.entries} entries, ${stats.totalHits} hits, ~${stats.estTokensSaved} tokens served from local disk instead of the model (estimated from actual cached answer sizes). Persists in .aicache/ across VS Code windows and AI-tool sessions — a hit here in a later session for a question stored earlier is expected behavior, not a bug.`,
+  };
+}
+
+/**
+ * Real MCP tool-call counts — but scoped only to this extension's own
+ * bundled token-cache server (cache_lookup/cache_store). Calls to
+ * codegraph_explore or any other tool run in processes this extension
+ * doesn't instrument, so those can't be counted here without guessing.
+ */
+export function measureCacheCalls(strategies: StrategyState): Measurement {
+  if (!strategies.semanticCache) {
+    return { status: 'disabled', detail: 'Strategy disabled in current profile' };
+  }
+  const ws = primaryWorkspacePath();
+  if (!ws) {
+    return { status: 'no-data', detail: 'No workspace folder open' };
+  }
+
+  const counts = new CallLogStore(ws).counts();
+  if (counts.lookups === 0 && counts.stores === 0) {
+    return { status: 'no-data', detail: 'No token-cache MCP tool calls recorded yet for this workspace.' };
+  }
+  return {
+    status: 'measured',
+    detail: `Lifetime, this workspace: ${counts.lookups} cache_lookup call(s) (${counts.hits} hit / ${counts.misses} miss${counts.staleHits > 0 ? `, ${counts.staleHits} stale` : ''}), ${counts.stores} cache_store call(s). Covers only this extension's bundled token-cache MCP server — not CodeGraph or other tool calls, which run in processes this extension doesn't instrument.`,
   };
 }

@@ -29,9 +29,9 @@ export function updateStatusBar(): void {
   const activeCount = Object.values(strategies).filter(Boolean).length;
   const profileLabel = getProfileShortLabel(config.profile);
 
-  statusBarItem.text = `$(zap) ${profileLabel} (${activeCount}/4)`;
+  statusBarItem.text = `$(zap) ${profileLabel} (${activeCount}/5)`;
   statusBarItem.tooltip = buildTooltip(config.profile, strategies);
-  statusBarItem.backgroundColor = activeCount === 4
+  statusBarItem.backgroundColor = activeCount === 5
     ? undefined
     : new vscode.ThemeColor('statusBarItem.warningBackground');
 }
@@ -47,7 +47,7 @@ function getProfileShortLabel(profile: Profile): string {
   return labels[profile];
 }
 
-function buildTooltip(profile: Profile, strategies: { codeGraph: boolean; outputCompression: boolean; verbosityControl: boolean; sessionManagement: boolean }): string {
+function buildTooltip(profile: Profile, strategies: { codeGraph: boolean; outputCompression: boolean; verbosityControl: boolean; sessionManagement: boolean; semanticCache: boolean }): string {
   const lines = [
     `AI Token Optimizer — ${PROFILE_DESCRIPTIONS[profile]}`,
     '',
@@ -56,6 +56,7 @@ function buildTooltip(profile: Profile, strategies: { codeGraph: boolean; output
     `  ${strategies.outputCompression ? '✓' : '✗'} CAP-2: RTK Output Compression`,
     `  ${strategies.verbosityControl ? '✓' : '✗'} CAP-3: Verbosity Control`,
     `  ${strategies.sessionManagement ? '✓' : '✗'} CAP-4: Session Management`,
+    `  ${strategies.semanticCache ? '✓' : '✗'} CAP-5: Semantic Cache`,
     '',
     'Click: change profile / validate / enable-disable',
   ];

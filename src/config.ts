@@ -9,6 +9,7 @@ export interface StrategyState {
   outputCompression: boolean;
   verbosityControl: boolean;
   sessionManagement: boolean;
+  semanticCache: boolean;
 }
 
 export interface CodeGraphProject {
@@ -28,14 +29,15 @@ export interface ExtensionConfig {
   autoInstallTools: boolean;
   configureMcpOnActivation: boolean;
   codeGraphProjects: CodeGraphProject[];
+  telemetryEnabled: boolean;
 }
 
 const PROFILE_STRATEGIES: Record<Profile, StrategyState> = {
-  full: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: true },
-  debug: { codeGraph: true, outputCompression: false, verbosityControl: true, sessionManagement: true },
-  planning: { codeGraph: true, outputCompression: true, verbosityControl: false, sessionManagement: true },
-  review: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: false },
-  custom: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: true },
+  full: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: true, semanticCache: true },
+  debug: { codeGraph: true, outputCompression: false, verbosityControl: true, sessionManagement: true, semanticCache: true },
+  planning: { codeGraph: true, outputCompression: true, verbosityControl: false, sessionManagement: true, semanticCache: true },
+  review: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: false, semanticCache: true },
+  custom: { codeGraph: true, outputCompression: true, verbosityControl: true, sessionManagement: true, semanticCache: true },
 };
 
 export function getConfig(): ExtensionConfig {
@@ -51,6 +53,7 @@ export function getConfig(): ExtensionConfig {
     autoInstallTools: config.get<boolean>('autoInstallTools', true),
     configureMcpOnActivation: config.get<boolean>('configureMcpOnActivation', true),
     codeGraphProjects: config.get<CodeGraphProject[]>('codeGraphProjects', []),
+    telemetryEnabled: config.get<boolean>('telemetry.enabled', true),
   };
 }
 

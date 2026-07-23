@@ -5,6 +5,11 @@
   "version": "0.1.0",
   "publisher": "ai-token-optimizer",
   "license": "MIT",
+  "author": "Vishal Gupta <vishalniit@users.noreply.github.com>",
+  "contributors": [
+    "Vishal Gupta (https://github.com/vishalniit)",
+    "Balachandar Saminathan (https://github.com/sbaala)"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -30,8 +35,12 @@
   "icon": "images/icon.png",
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "https://github.com/sbaala/ai-token-optimize-vscode.git"
   },
+  "bugs": {
+    "url": "https://github.com/sbaala/ai-token-optimize-vscode/issues"
+  },
+  "homepage": "https://github.com/sbaala/ai-token-optimize-vscode#readme",
   "contributes": {
     "commands": [
       {
@@ -67,8 +76,8 @@
         "title": "AI Token Optimizer: Validate All Strategies"
       },
       {
-        "command": "aiTokenOptimizer.toggleAll",
-        "title": "AI Token Optimizer: Enable / Disable Plugin"
+        "command": "aiTokenOptimizer.clearCache",
+        "title": "AI Token Optimizer: Clear Semantic Cache"
       },
       {
         "command": "aiTokenOptimizer.validateIndex",
@@ -77,6 +86,10 @@
       {
         "command": "aiTokenOptimizer.manageProjects",
         "title": "AI Token Optimizer: Manage CodeGraph Projects"
+      },
+      {
+        "command": "aiTokenOptimizer.exportTelemetry",
+        "title": "AI Token Optimizer: Export Telemetry (JSON/CSV/Markdown)"
       }
     ],
     "configuration": {
@@ -134,7 +147,8 @@
             "codeGraph": true,
             "outputCompression": true,
             "verbosityControl": true,
-            "sessionManagement": true
+            "sessionManagement": true,
+            "semanticCache": true
           },
           "properties": {
             "codeGraph": {
@@ -152,6 +166,10 @@
             "sessionManagement": {
               "type": "boolean",
               "description": "CAP-4: Session management and context hygiene"
+            },
+            "semanticCache": {
+              "type": "boolean",
+              "description": "CAP-5: Local semantic cache — serve repeated/similar questions from disk"
             }
           },
           "description": "Toggle individual strategies (used when profile is 'custom')."
@@ -204,6 +222,11 @@
               }
             }
           }
+        },
+        "aiTokenOptimizer.telemetry.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Collect repository intelligence metrics from the CodeGraph index and show them (with a modeled savings estimate) in the dashboard."
         }
       }
     }
