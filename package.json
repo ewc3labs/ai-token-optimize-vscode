@@ -5,6 +5,11 @@
   "version": "0.1.0",
   "publisher": "ai-token-optimizer",
   "license": "MIT",
+  "author": "Vishal Gupta <vishalniit@users.noreply.github.com>",
+  "contributors": [
+    "Vishal Gupta (https://github.com/vishalniit)",
+    "Balachandar Saminathan (https://github.com/sbaala)"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -30,8 +35,12 @@
   "icon": "images/icon.png",
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "https://github.com/sbaala/ai-token-optimize-vscode.git"
   },
+  "bugs": {
+    "url": "https://github.com/sbaala/ai-token-optimize-vscode/issues"
+  },
+  "homepage": "https://github.com/sbaala/ai-token-optimize-vscode#readme",
   "contributes": {
     "commands": [
       {
