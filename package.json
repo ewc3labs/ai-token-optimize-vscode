@@ -1,6 +1,6 @@
 {
   "name": "ai-token-optimizer",
-  "displayName": "AI Token Optimizer",
+  "displayName": "Token Optimizer for Claude & Copilot",
   "description": "Automatically reduces token consumption for Claude Code, GitHub Copilot, and Codex by injecting optimized instructions, installing compression tools, and configuring MCP servers.",
   "version": "0.1.0",
   "publisher": "ai-token-optimizer",
