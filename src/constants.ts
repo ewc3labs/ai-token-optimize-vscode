@@ -12,8 +12,20 @@ export const CODEX_EXTENSION_ID = 'openai.codex';
 // Install method for each tool
 export type ToolInstallMethod = 'npm-global' | 'brew' | 'shell-script';
 
+/**
+ * Windows has neither Homebrew nor `curl | sh`, so tools that ship as a
+ * release archive are downloaded and unpacked into the extension's managed bin
+ * directory (see toolResolver.managedBinDir) via PowerShell.
+ */
+export interface WindowsDownload {
+  /** Direct .zip URL — `releases/latest/download/...` avoids an API call. */
+  zipUrl: string;
+  /** Executable expected inside the archive, e.g. `rtk.exe`. */
+  exeName: string;
+}
+
 export interface ToolInstallEntry {
-  /** Binary name checked with `which` */
+  /** Binary name resolved via toolResolver (PATH + known install dirs) */
   name: string;
   description: string;
   method: ToolInstallMethod;
@@ -23,6 +35,8 @@ export interface ToolInstallEntry {
   brewPackage?: string;
   /** curl install script URL fallback for non-macOS (method: brew falls back to this) */
   shellScriptUrl?: string;
+  /** Prebuilt Windows archive — used instead of brew/shell on win32 */
+  windowsDownload?: WindowsDownload;
   /** Args passed to the binary after a successful install */
   postInstallArgs?: string[];
 }
@@ -44,6 +58,12 @@ export const TOOLS_TO_INSTALL: ToolInstallEntry[] = [
     method: 'brew',
     brewPackage: 'rtk',
     shellScriptUrl: 'https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh',
+    // Windows has no brew/sh — rtk publishes an x86_64 MSVC zip per release
+    // (runs under emulation on arm64 Windows; no arm64 asset is published).
+    windowsDownload: {
+      zipUrl: 'https://github.com/rtk-ai/rtk/releases/latest/download/rtk-x86_64-pc-windows-msvc.zip',
+      exeName: 'rtk.exe',
+    },
     // Wires VS Code Copilot PreToolUse hook — transparent command rewrite, zero config
     postInstallArgs: ['init', '-g', '--copilot'],
   },

@@ -4,7 +4,7 @@
 // gracefully when sqlite3 is absent (see repositoryCollector's fallback).
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { ranOk, runTool } from '../installer/toolResolver';
 
 /** Unit-separator record/field delimiters — safe against `|`/tab in data. */
 const FS = '\x1f';
@@ -30,8 +30,9 @@ export function locateDb(projectPath: string): CodeGraphDbLocation | null {
 /** Whether the `sqlite3` CLI is invocable at all. */
 export function isSqliteAvailable(): boolean {
   try {
-    const r = spawnSync('sqlite3', ['-version'], { timeout: 3000, stdio: ['ignore', 'ignore', 'ignore'] });
-    return r.status === 0 && !r.error;
+    // Windows ships no sqlite3 by default — callers fall back to
+    // `codegraph status` totals, so a false here is expected, not an error.
+    return ranOk(runTool('sqlite3', ['-version'], { timeoutMs: 3000 }));
   } catch {
     return false;
   }
@@ -44,13 +45,14 @@ export function isSqliteAvailable(): boolean {
  * Returns null on any failure (missing CLI, locked/corrupt db, timeout).
  */
 export function query(dbPath: string, sql: string, timeoutMs = 5000): string[][] | null {
-  const uri = `file:${dbPath}?immutable=1`;
-  const r = spawnSync(
+  // Backslashes are not legal in a sqlite file: URI — normalise Windows paths.
+  const uri = `file:${dbPath.replace(/\\/g, '/')}?immutable=1`;
+  const r = runTool(
     'sqlite3',
     ['-readonly', '-batch', '-noheader', '-nullvalue', '', '-separator', FS, '-newline', RS, uri, sql],
-    { encoding: 'utf-8', timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'] },
+    { timeoutMs },
   );
-  if (r.error || r.status !== 0) { return null; }
+  if (!ranOk(r)) { return null; }
   const out = r.stdout ?? '';
   // sqlite3 terminates every row (including the last) with the row separator,
   // so a naive split leaves a trailing empty record — drop empties.

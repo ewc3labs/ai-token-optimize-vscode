@@ -35,7 +35,13 @@ suite('Claude Code MCP configuration (CAP-5 wiring)', () => {
     const written = JSON.parse(fs.readFileSync(claudeConfigPath, 'utf-8'));
     const servers = written.projects[wsPath].mcpServers;
     assert.ok(servers['token-cache'], 'token-cache entry missing from project mcpServers');
-    assert.strictEqual(servers['token-cache'].command, 'node');
+    // MCP hosts spawn without a shell, so the entry names node by absolute path
+    // when one can be resolved (bare 'node' only as a last resort).
+    const nodeCommand: string = servers['token-cache'].command;
+    assert.ok(
+      nodeCommand === 'node' || (path.isAbsolute(nodeCommand) && /node(\.exe)?$/i.test(nodeCommand)),
+      `unexpected node command: ${nodeCommand}`
+    );
     assert.deepStrictEqual(servers['token-cache'].args, [
       path.join('/ext/path', 'dist', 'cache-server.js'),
       wsPath,

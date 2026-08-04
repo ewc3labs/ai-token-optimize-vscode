@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
 import { getProjectsToIndex } from '../ui/projectPicker';
-import { isBinaryAvailable } from '../installer/installer';
+import { combinedOutput, isBinaryAvailable, pathStartsWith, ranOk, runTool } from '../installer/toolResolver';
 import { invalidateTtl } from '../cache/ttlCache';
 import { recordReindex } from '../session/tracker';
 
@@ -99,7 +98,9 @@ export async function runCodeGraphReindex(outputChannel: vscode.OutputChannel): 
   }
   const changedPaths = Array.from(pendingChangedFiles);
   const toReindex = projects.filter(p =>
-    changedPaths.some(f => f.startsWith(p.absPath)) || !fs.existsSync(path.join(p.absPath, '.codegraph'))
+    // Case-insensitive containment: on Windows the same folder can arrive as
+    // `C:\repo` or `c:\repo` depending on which API produced the path.
+    changedPaths.some(f => pathStartsWith(f, p.absPath)) || !fs.existsSync(path.join(p.absPath, '.codegraph'))
   );
   const targets = toReindex.length > 0 ? toReindex : projects;
   outputChannel.appendLine(`[codegraph] Reindexing ${targets.length}/${projects.length} project(s): ${targets.map(p => p.name).join(', ')}`);
@@ -114,19 +115,20 @@ export async function runCodeGraphReindex(outputChannel: vscode.OutputChannel): 
     const hasIndex = fs.existsSync(path.join(project.absPath, '.codegraph'));
     // codegraph init — one step: creates .codegraph/ and builds the full graph
     // codegraph sync — incremental update for an already-initialized project
-    const cmd = hasIndex ? 'codegraph sync' : 'codegraph init';
-    try {
-      outputChannel.appendLine(`[codegraph] → ${project.name} (${project.absPath})`);
-      execSync(cmd, { cwd: project.absPath, timeout: 60000 });
+    const subcommand = hasIndex ? 'sync' : 'init';
+    outputChannel.appendLine(`[codegraph] → ${project.name} (${project.absPath})`);
+    const result = runTool('codegraph', [subcommand], { cwd: project.absPath, timeoutMs: 60000 });
+    if (ranOk(result)) {
       const now = new Date();
       projectIndexState.set(project.absPath, { lastIndexed: now, status: 'fresh' });
       lastIndexedAt = now;
       succeeded++;
       outputChannel.appendLine(`[codegraph] ✓ ${project.name} indexed at ${now.toLocaleTimeString()}`);
-    } catch (err) {
+    } else {
       failed++;
       projectIndexState.set(project.absPath, { lastIndexed: undefined, status: 'error' });
-      outputChannel.appendLine(`[codegraph] ✗ ${project.name}: ${err instanceof Error ? err.message.split('\n')[0] : String(err)}`);
+      const detail = result.error?.message || combinedOutput(result).trim().split('\n').slice(-1)[0] || `exit ${result.status}`;
+      outputChannel.appendLine(`[codegraph] ✗ ${project.name}: ${detail}`);
     }
   }
   pendingChangedFiles.clear();
@@ -142,21 +144,21 @@ export async function runCodeGraphReindex(outputChannel: vscode.OutputChannel): 
 
 /** Run `codegraph status` and append the key stats lines to the Output channel. */
 function appendCodeGraphStats(outputChannel: vscode.OutputChannel, projectPath: string): void {
-  try {
-    const out = execSync('codegraph status', { cwd: projectPath, timeout: 10000, encoding: 'utf-8' });
-    const lines = out.split('\n');
-    const want = ['Files:', 'Nodes:', 'Edges:', 'DB Size:', 'Journal:'];
-    for (const line of lines) {
-      if (want.some(k => line.trimStart().startsWith(k))) {
-        outputChannel.appendLine(`    ${line.trimStart()}`);
-      }
-    }
-    const freshLine = lines.find(l => l.includes('up to date') || l.includes('stale'));
-    if (freshLine) {
-      outputChannel.appendLine(`    ${freshLine.trim()}`);
-    }
-  } catch {
+  const result = runTool('codegraph', ['status'], { cwd: projectPath, timeoutMs: 10000 });
+  if (!ranOk(result)) {
     outputChannel.appendLine('    (codegraph status unavailable)');
+    return;
+  }
+  const lines = (result.stdout ?? '').split('\n');
+  const want = ['Files:', 'Nodes:', 'Edges:', 'DB Size:', 'Journal:'];
+  for (const line of lines) {
+    if (want.some(k => line.trimStart().startsWith(k))) {
+      outputChannel.appendLine(`    ${line.trimStart()}`);
+    }
+  }
+  const freshLine = lines.find(l => l.includes('up to date') || l.includes('stale'));
+  if (freshLine) {
+    outputChannel.appendLine(`    ${freshLine.trim()}`);
   }
 }
 

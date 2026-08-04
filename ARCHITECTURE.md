@@ -25,7 +25,7 @@ The instruction-file approach is the primary mechanism and works immediately on 
 | Tool | Package / Install | Binary | Purpose |
 |---|---|---|---|
 | **CodeGraph** | `npm install -g @colbymchenry/codegraph` | `codegraph` | Semantic code-graph index — 58% fewer AI tool calls, 22% faster answers. 56k ★ MIT |
-| **RTK** | `brew install rtk` or `curl \| sh` | `rtk` | CLI proxy — 60–90% token savings on git, test, build, ls, grep commands. 67k ★ Apache 2.0 |
+| **RTK** | `brew install rtk` / `curl \| sh` (macOS, Linux) · GitHub release zip → `%LOCALAPPDATA%\ai-token-optimizer\bin` (Windows) | `rtk` | CLI proxy — 60–90% token savings on git, test, build, ls, grep commands. 67k ★ Apache 2.0 |
 | **Context7** | `npx @context7/mcp-server` (MCP) | — | Documentation lookup via MCP |
 
 > **Note:** The earlier transcript referenced `codegraph`, `rtk-compress`, and `caveman` as npm package names. `rtk-compress` and `caveman` do not exist on npm. The real packages are `@colbymchenry/codegraph` and `rtk` (Rust binary via brew/curl).
@@ -196,37 +196,63 @@ Four built-in profiles enforce the spec's quality-trade-off constraints. Strateg
 
 ## 6. Tool Installation Flow (`installer/installer.ts`)
 
-RTK is a Rust binary (not on npm). CodeGraph is on npm. The installer handles both:
+RTK is a Rust binary (not on npm). CodeGraph is on npm. The installer handles both, on all three platforms:
 
 ```mermaid
 flowchart TD
     A([installAllTools called\non workspace open]) --> B[generateCavemanConfig\nWrite .cavemanrc if missing]
-    B --> C[logToolAvailability\nrtk · codegraph · rg · git · jq]
+    B --> B2[invalidateToolCache\nre-probe: a tool may have been\ninstalled by hand since last run]
+    B2 --> C[logToolAvailability\nrtk · codegraph · rg · git · jq\nlogs the resolved path, not just yes/no]
     C --> D{For each entry in\nTOOLS_TO_INSTALL}
 
-    D --> E{isBinaryAvailable\nbinary?}
-    E -- Yes --> F[Log: already installed\nSkip]
+    D --> E{resolveTool finds it?\noverride → PATH → known dirs}
+    E -- Yes, on PATH --> F[Log: already installed\nSkip]
+    E -- Yes, off PATH --> F2[Skip install +\nofferPathHint\nadd dir to user PATH?]
     E -- No --> G[showInformationMessage\nInstall Now / Later]
 
     G -- Later --> H[Skip]
     G -- Install Now --> I{tool.method?}
 
-    I -- npm-global --> J[spawnSync npm install -g\n@colbymchenry/codegraph\ntimeout 120s]
-    I -- brew --> K{brew available\non macOS?}
+    I -- npm-global --> J[runTool npm install -g\n@colbymchenry/codegraph\ncmd.exe wrapper for npm.cmd\ntimeout 180s]
+    I -- brew/shell --> K{platform?}
 
-    J -- exit 0 --> L[offerWireCodegraphAgents\nspawnSync codegraph install --yes]
+    J -- exit 0 --> L[offerWireCodegraphAgents\nrunTool codegraph install --yes]
     J -- exit non-0 --> M[showErrorMessage\nnpm install -g @colbymchenry/codegraph]
 
-    K -- Yes --> N[spawnSync brew install rtk]
-    K -- No / fails --> O[spawnSync sh -c\ncurl -fsSL install.sh | sh]
+    K -- win32 --> W[installOnWindows\nPowerShell: Invoke-WebRequest +\nExpand-Archive release zip →\nmanagedBinDir]
+    K -- darwin + brew --> N[runTool brew install rtk]
+    K -- other / brew fails --> O[runTool sh -c\ncurl -fsSL install.sh | sh]
 
     N -- exit 0 --> P[runPostInstall\nrtk init -g --copilot\nWires VS Code Copilot PreToolUse hook]
     O -- exit 0 --> P
+    W -- exe present --> P
     N -- exit non-0 --> Q[Try shell script fallback]
     Q --> O
 
     P --> R[showInformationMessage\nRestart VS Code to activate hook]
+    W --> F2
 ```
+
+### Tool resolution (`installer/toolResolver.ts`)
+
+Every shell-out in the extension goes through this module — nothing calls `which`, and nothing spawns a bare tool name.
+
+```mermaid
+flowchart LR
+    A([resolveTool name]) --> B{aiTokenOptimizer.toolPaths\noverride?}
+    B -- file or dir hit --> Z[[ResolvedTool\nsource: override]]
+    B -- no / bad path --> C[Scan PATH entries\n× PATHEXT candidates\n.exe .cmd .bat … on win32]
+    C -- hit --> Y[[ResolvedTool\nsource: path]]
+    C -- miss --> D[Probe known install dirs\n%APPDATA%\\npm · npm prefix ·\nwinget · scoop · chocolatey ·\n~/.cargo/bin · managedBinDir ·\n/opt/homebrew/bin · /usr/local/bin]
+    D -- hit --> X[[ResolvedTool\nsource: known-dir\n→ works here, but not in\nthe user's terminal]]
+    D -- miss --> N[[null → callers degrade\nto instruction-only mode]]
+
+    Z & Y & X --> R{path ends in\n.cmd / .bat?}
+    R -- yes --> S[runTool → cmd.exe /d /s /c\nwindowsVerbatimArguments\nmcp entry → cmd /c abs-path]
+    R -- no --> T[runTool → spawn directly\nmcp entry → abs path,\nor bare name if source=path\non POSIX so nvm switches\ndon't break it]
+```
+
+Results are memoized for 60s (filesystem probing only, no process spawn) and invalidated after an install or a `toolPaths` change. `AI Token Optimizer: Diagnose Tool Detection` prints the whole table plus every directory searched.
 
 **RTK wiring:** `rtk init -g --copilot` writes a PreToolUse hook into VS Code Copilot's config. This transparently rewrites shell commands before execution (`git status` → `rtk git status`). RTK uses **hooks, not MCP**.
 
@@ -296,7 +322,7 @@ flowchart TD
     E --> E1{strategy enabled?}
     E1 -- No --> E2[Status: disabled]
     E1 -- Yes --> E3{rtk binary?}
-    E3 -- No --> E4[Status: error\nbrew install rtk]
+    E3 -- No --> E4[Status: error\nplatform-specific install hint +\nset aiTokenOptimizer.toolPaths]
     E3 -- Yes --> E5[Get version\nrtk init --show hook status\nrtk gain savings stats]
     E5 --> E6[Status: ok]
 

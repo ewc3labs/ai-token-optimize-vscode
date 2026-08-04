@@ -7,7 +7,7 @@
 // not --format json/csv — parsing that would mean regex-scraping an
 // unstable, dynamically-truncated table, the same fragility that made the
 // old synthetic benchmark unreliable. Skipped for now.
-import { spawnSync } from 'child_process';
+import { ranOk, runTool } from '../installer/toolResolver';
 
 export type RtkGainStatus = 'measured' | 'no-data' | 'error';
 
@@ -61,13 +61,9 @@ export function parseRtkGainOutput(jsonText: string): RtkGainResult {
 
 /** Thin I/O wrapper — shells out to the real rtk binary and delegates parsing. */
 export function getRtkGain(cwd: string): RtkGainResult {
-  const result = spawnSync('rtk', ['gain', '--format', 'json', '--all', '--project'], {
-    cwd,
-    encoding: 'utf-8',
-    timeout: 5000,
-  });
+  const result = runTool('rtk', ['gain', '--format', 'json', '--all', '--project'], { cwd, timeoutMs: 5000 });
 
-  if (result.error || result.status !== 0) {
+  if (!ranOk(result)) {
     return { status: 'error', detail: `rtk gain exited with an error — ${result.error?.message || `status ${result.status}`}` };
   }
 

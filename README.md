@@ -164,6 +164,7 @@ Disable collection entirely with `aiTokenOptimizer.telemetry.enabled: false`.
 | `AI Token Optimizer: Manage CodeGraph Projects` | Pick which folders get indexed in a multi-repo workspace |
 | `AI Token Optimizer: Install Optimization Tools` | Re-run tool installation |
 | `AI Token Optimizer: Configure MCP Servers` | Re-run MCP server configuration |
+| `AI Token Optimizer: Diagnose Tool Detection` | Show where each CLI tool resolved from, and every directory that was searched |
 | `AI Token Optimizer: Clear Semantic Cache` | Empty the local answer cache |
 | `AI Token Optimizer: Export Telemetry (JSON/CSV/Markdown)` | Export metrics and history to a file |
 
@@ -187,6 +188,7 @@ The `⚡ Full (5/5)` item shows the active profile and how many strategies are l
 | `aiTokenOptimizer.autoInstallTools` | `true` | Offer to install CodeGraph and RTK on activation |
 | `aiTokenOptimizer.configureMcpOnActivation` | `true` | Auto-configure MCP servers on activation |
 | `aiTokenOptimizer.codeGraphProjects` | `[]` | Array of `{ name, path, enabled }` scoping which folders get indexed. Empty means all workspace folders |
+| `aiTokenOptimizer.toolPaths` | `{}` | Explicit paths to `codegraph` / `rtk` / `sqlite3` / `node` / `npm` when they live somewhere the extension can't find on its own. Accepts a file or its folder |
 | `aiTokenOptimizer.telemetry.enabled` | `true` | Collect repository metrics from the CodeGraph index for the dashboard |
 
 ---
@@ -198,8 +200,8 @@ The `⚡ Full (5/5)` item shows the active profile and how many strategies are l
 - VS Code **1.85.0+**
 - Node.js (for the global npm install of CodeGraph)
 - At least one AI coding tool: GitHub Copilot, Claude Code, or Codex
-- Optional: Homebrew (macOS) for RTK — otherwise the upstream install script is used
-- Optional: `sqlite3` CLI for the full telemetry breakdown (falls back to `codegraph status` totals without it)
+- Optional: Homebrew (macOS) for RTK — otherwise the upstream install script (macOS/Linux) or the published `rtk.exe` release archive (Windows) is used
+- Optional: `sqlite3` CLI for the full telemetry breakdown (falls back to `codegraph status` totals without it — the usual case on Windows)
 
 ### From VSIX
 
@@ -222,10 +224,23 @@ code --install-extension ai-token-optimizer-0.1.0.vsix
 
 | Tool | Package | Method | License / Source |
 |------|---------|--------|------------------|
-| `codegraph` | `@colbymchenry/codegraph` | npm global | [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph) |
-| `rtk` | `rtk` (Rust binary — **not** an npm package) | `brew install rtk`, falling back to the upstream `install.sh` | [rtk-ai/rtk](https://github.com/rtk-ai/rtk), Apache 2.0 |
+| `codegraph` | `@colbymchenry/codegraph` | npm global (all platforms) | [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph) |
+| `rtk` | `rtk` (Rust binary — **not** an npm package) | macOS/Linux: `brew install rtk`, falling back to the upstream `install.sh`. Windows: downloads `rtk-x86_64-pc-windows-msvc.zip` from the latest GitHub release into `%LOCALAPPDATA%\ai-token-optimizer\bin` | [rtk-ai/rtk](https://github.com/rtk-ai/rtk), Apache 2.0 |
 
 Both are installed only after you confirm the prompt.
+
+### Windows notes
+
+- **Detection never uses `which`.** Tools are located by scanning `PATH` directly (honouring `PATHEXT`, so `.cmd`/`.exe` shims resolve) and then by probing the places installers actually use: `%APPDATA%\npm`, the npm prefix, winget links, scoop shims, chocolatey, `~/.cargo/bin`, and the extension's own `%LOCALAPPDATA%\ai-token-optimizer\bin`. A tool you installed by hand is picked up even when VS Code inherited a stale `PATH`.
+- **npm-installed CLIs are `.cmd` shims**, which Node cannot spawn directly. They are invoked through `cmd.exe`, and MCP server entries are written as an absolute path (wrapped in `cmd /c` for shims) so shell-less MCP hosts can start them. Entries written by an older version that named a bare `codegraph`/`npx` are rewritten automatically.
+- **If something still isn't found**, run `AI Token Optimizer: Diagnose Tool Detection` — it prints the resolved path for every tool plus every directory searched — and set `aiTokenOptimizer.toolPaths`, e.g.
+  ```json
+  "aiTokenOptimizer.toolPaths": {
+    "codegraph": "C:\\Users\\you\\AppData\\Roaming\\npm\\codegraph.cmd",
+    "rtk": "C:\\tools\\rtk.exe"
+  }
+  ```
+- **RTK's Copilot hook needs `rtk` on your PATH**, since the hook shells out to a bare `rtk`. After a Windows install the extension offers to append its bin directory to your *user* PATH (never the system one); take it and reload the window, or add the folder yourself.
 
 ---
 

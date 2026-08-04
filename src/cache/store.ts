@@ -2,7 +2,7 @@
 // standalone MCP cache server bundle (dist/cache-server.js).
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { runTool } from '../installer/toolResolver';
 import { normalizeQuery, cacheKey, buildIdf, similarity, isMatch } from './similarity';
 
 export const CACHE_DIR = '.aicache';
@@ -210,10 +210,11 @@ export class SemanticCacheStore {
     }
     let head: string | null = null;
     try {
-      const result = spawnSync('git', ['rev-parse', 'HEAD'], {
+      // runTool, not a bare spawn: this also runs inside the standalone MCP
+      // cache-server process, whose PATH is whatever the MCP host handed it.
+      const result = runTool('git', ['rev-parse', 'HEAD'], {
         cwd: this.workspaceRoot,
-        encoding: 'utf-8',
-        timeout: 3000,
+        timeoutMs: 3000,
       });
       if (result.status === 0 && result.stdout) {
         head = result.stdout.trim();

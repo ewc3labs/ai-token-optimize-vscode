@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync, spawnSync } from 'child_process';
 import { getConfig, getEffectiveStrategies } from '../config';
-import { isBinaryAvailable } from '../installer/installer';
+import { IS_WINDOWS, combinedOutput, describeTool, isBinaryAvailable, ranOk, resolveTool, runTool } from '../installer/toolResolver';
 import { getProjectsToIndex } from '../ui/projectPicker';
 import { COPILOT_INSTRUCTIONS_PATH, CLAUDE_INSTRUCTIONS_PATH, CODEX_INSTRUCTIONS_PATH, MARKER_START, MCP_CACHE_SERVER_NAME } from '../constants';
 import { SemanticCacheStore, CACHE_DIR, CACHE_FILE } from '../cache/store';
@@ -22,22 +21,42 @@ interface CategoryResult {
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 function runCmd(cmd: string, args: string[], cwd?: string): string {
-  const r = spawnSync(cmd, args, {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 10000,
-    encoding: 'utf-8',
-    cwd,
-  });
-  return (r.stdout ?? '') + (r.stderr ?? '');
+  return combinedOutput(runTool(cmd, args, { cwd, timeoutMs: 10000 }));
 }
 
 function getVersion(bin: string): string {
-  try {
-    const out = execSync(`${bin} --version`, { stdio: 'pipe', timeout: 5000, encoding: 'utf-8' });
-    return out.trim().split('\n')[0];
-  } catch {
-    return 'unknown';
+  const r = runTool(bin, ['--version'], { timeoutMs: 5000 });
+  if (!ranOk(r)) { return 'unknown'; }
+  return (r.stdout ?? '').trim().split('\n')[0];
+}
+
+/** Platform-correct install instructions — brew/curl do not exist on Windows. */
+function installHint(tool: 'codegraph' | 'rtk'): string[] {
+  if (tool === 'codegraph') {
+    return [
+      'Install: npm install -g @colbymchenry/codegraph',
+      'Then run "AI Token Optimizer: Install Tools" or: codegraph install --yes',
+    ];
   }
+  if (IS_WINDOWS) {
+    return [
+      'Install: run "AI Token Optimizer: Install Tools" (downloads rtk.exe from GitHub releases)',
+      'Manual : https://github.com/rtk-ai/rtk/releases/latest → rtk-x86_64-pc-windows-msvc.zip',
+      '         extract rtk.exe to a folder on PATH, then run: rtk init -g --copilot',
+    ];
+  }
+  return [
+    'Install: brew install rtk   (macOS)',
+    '         curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh',
+    'Then run "AI Token Optimizer: Install Tools" to wire the VS Code Copilot hook',
+  ];
+}
+
+/** Extra line when a tool resolved outside PATH — the common Windows case. */
+function pathNote(bin: string): string[] {
+  const resolved = resolveTool(bin);
+  if (!resolved || resolved.source === 'path') { return []; }
+  return [`Location   : ${describeTool(bin)}`];
 }
 
 function wsPath(): string {
@@ -78,15 +97,16 @@ async function validateCodeGraph(): Promise<CategoryResult> {
     return {
       category: 'CodeGraph', cap: 'CAP-1', status: 'error',
       lines: [
-        'codegraph binary not found on PATH',
-        'Install: npm install -g @colbymchenry/codegraph',
-        'Then run "AI Token Optimizer: Install Tools" or: codegraph install --yes',
+        'codegraph binary not found on PATH or in any known install directory',
+        ...installHint('codegraph'),
+        'Already installed elsewhere? Set "aiTokenOptimizer.toolPaths": { "codegraph": "<full path>" }',
       ],
     };
   }
 
   const version = getVersion('codegraph');
   lines.push(`Binary     : codegraph ${version}`);
+  lines.push(...pathNote('codegraph'));
 
   const projects = getProjectsToIndex();
   if (projects.length === 0) {
@@ -153,16 +173,16 @@ async function validateRtk(): Promise<CategoryResult> {
     return {
       category: 'RTK Output Compression', cap: 'CAP-2', status: 'error',
       lines: [
-        'rtk binary not found on PATH',
-        'Install: brew install rtk   (macOS)',
-        '         curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh',
-        'Then run "AI Token Optimizer: Install Tools" to wire the VS Code Copilot hook',
+        'rtk binary not found on PATH or in any known install directory',
+        ...installHint('rtk'),
+        'Already installed elsewhere? Set "aiTokenOptimizer.toolPaths": { "rtk": "<full path>" }',
       ],
     };
   }
 
   const version = getVersion('rtk');
   lines.push(`Binary     : rtk ${version}`);
+  lines.push(...pathNote('rtk'));
 
   // Check if hook is wired for VS Code Copilot
   const showOut = runCmd('rtk', ['init', '--show']);
@@ -439,7 +459,9 @@ export async function validateAllStrategies(outputChannel: vscode.OutputChannel)
         fixes.push('Install CodeGraph: npm install -g @colbymchenry/codegraph');
       }
       if (r.cap === 'CAP-2' && !isBinaryAvailable('rtk')) {
-        fixes.push('Install RTK: brew install rtk');
+        fixes.push(IS_WINDOWS
+          ? 'Install RTK: run "AI Token Optimizer: Install Optimization Tools" (downloads rtk.exe)'
+          : 'Install RTK: brew install rtk');
       }
       if ((r.cap === 'CAP-3' || r.cap === 'CAP-4' || r.cap === 'CAP-5') && r.lines.some(l => l.includes('not found') || l.includes('missing'))) {
         fixes.push('Regenerate instruction files: run "AI Token Optimizer: Regenerate Instruction Files"');

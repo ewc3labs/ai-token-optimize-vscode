@@ -1,13 +1,43 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { isBinaryAvailable } from '../installer/installer';
+import { IS_WINDOWS, mcpCommandFor, resolveTool } from '../installer/toolResolver';
 import { MCP_CACHE_SERVER_NAME } from '../constants';
 
 export interface McpServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+}
+
+/**
+ * MCP hosts (VS Code, Claude Code) spawn servers without a shell, so a bare
+ * `codegraph`/`npx` command only works when the host's own PATH happens to
+ * contain it — which on Windows it usually does not, and where npm CLIs are
+ * `.cmd` shims that cannot be spawned directly at all. Every entry we write
+ * therefore uses an absolute path (wrapped in `cmd /c` for shims).
+ */
+function serverEntry(bin: string, args: string[], fallbackCommand = bin): Record<string, unknown> {
+  const spec = mcpCommandFor(bin, args);
+  if (spec) {
+    return { command: spec.command, args: spec.args, type: 'stdio' };
+  }
+  return { command: fallbackCommand, args, type: 'stdio' };
+}
+
+/**
+ * True when an already-present entry cannot actually start: a bare command that
+ * this machine's PATH won't resolve (or a Windows `.cmd` shim that needs the
+ * `cmd /c` wrapper). Such entries are rewritten rather than left in place —
+ * they were written by an older version of this extension.
+ */
+function isUnusableEntry(entry: unknown, bin: string): boolean {
+  const command = (entry as { command?: unknown })?.command;
+  if (typeof command !== 'string' || command.length === 0) { return true; }
+  if (command.includes('/') || command.includes('\\')) { return false; }
+  const resolved = resolveTool(bin);
+  if (!resolved) { return false; }
+  return IS_WINDOWS || resolved.source !== 'path';
 }
 
 export function detectExistingMcpConfig(workspacePath: string): { vscode: boolean; claude: boolean } {
@@ -95,11 +125,11 @@ export async function configureMcpServers(outputChannel: vscode.OutputChannel, e
 // the extension install path is versioned, so a stale absolute path from a
 // previous version must be replaced on every activation.
 function cacheServerEntry(extensionPath: string, wsPath: string): Record<string, unknown> {
-  return {
-    command: 'node',
-    args: [path.join(extensionPath, 'dist', 'cache-server.js'), wsPath],
-    type: 'stdio',
-  };
+  // Absolute node path on Windows, where MCP hosts frequently start with a PATH
+  // that has no node in it; bare `node` elsewhere (see toMcpSpec).
+  const args = [path.join(extensionPath, 'dist', 'cache-server.js'), wsPath];
+  const spec = mcpCommandFor('node', args);
+  return { command: spec?.command ?? 'node', args: spec?.args ?? args, type: 'stdio' };
 }
 
 async function configureVsCodeMcp(wsPath: string, languages: string[], outputChannel: vscode.OutputChannel, extensionPath: string): Promise<void> {
@@ -128,25 +158,21 @@ async function configureVsCodeMcp(wsPath: string, languages: string[], outputCha
   }
 
   // Add Context7 for documentation lookup
-  if (!mcpServers['context7']) {
-    mcpServers['context7'] = {
-      command: 'npx',
-      args: ['-y', '@context7/mcp-server'],
-      env: {},
-    };
+  if (!mcpServers['context7'] || isUnusableEntry(mcpServers['context7'], 'npx')) {
+    mcpServers['context7'] = { ...serverEntry('npx', ['-y', '@context7/mcp-server']), env: {} };
     outputChannel.appendLine('[mcp] Added Context7 MCP server for documentation lookup');
   }
 
   // Add CodeGraph MCP server if the binary is available.
   // codegraph mcp starts the MCP server in stdio mode (tool: codegraph_explore).
   // Users can also run `codegraph install` for full agent wiring.
-  if (isBinaryAvailable('codegraph') && !mcpServers['codegraph']) {
-    mcpServers['codegraph'] = {
-      command: 'codegraph',
-      args: ['mcp'],
-      type: 'stdio',
-    };
-    outputChannel.appendLine('[mcp] Added CodeGraph MCP server (codegraph_explore tool)');
+  if (resolveTool('codegraph')) {
+    if (!mcpServers['codegraph'] || isUnusableEntry(mcpServers['codegraph'], 'codegraph')) {
+      mcpServers['codegraph'] = serverEntry('codegraph', ['mcp']);
+      outputChannel.appendLine(`[mcp] Added CodeGraph MCP server (codegraph_explore tool) → ${resolveTool('codegraph')?.path}`);
+    }
+  } else {
+    outputChannel.appendLine('[mcp] codegraph binary not found — skipping CodeGraph MCP entry');
   }
 
   mcpServers[MCP_CACHE_SERVER_NAME] = cacheServerEntry(extensionPath, wsPath);
@@ -196,20 +222,14 @@ export async function configureClaudeMcp(
   }
 
   // Add Context7
-  if (!servers['context7']) {
-    servers['context7'] = {
-      command: 'npx',
-      args: ['-y', '@context7/mcp-server'],
-    };
+  if (!servers['context7'] || isUnusableEntry(servers['context7'], 'npx')) {
+    servers['context7'] = serverEntry('npx', ['-y', '@context7/mcp-server']) as unknown as McpServerConfig;
     outputChannel.appendLine('[mcp] Added Context7 to Claude MCP config');
   }
 
   // Add CodeGraph if installed
-  if (isBinaryAvailable('codegraph') && !servers['codegraph']) {
-    servers['codegraph'] = {
-      command: 'codegraph',
-      args: ['mcp'],
-    };
+  if (resolveTool('codegraph') && (!servers['codegraph'] || isUnusableEntry(servers['codegraph'], 'codegraph'))) {
+    servers['codegraph'] = serverEntry('codegraph', ['mcp']) as unknown as McpServerConfig;
     outputChannel.appendLine('[mcp] Added CodeGraph to Claude MCP config (codegraph_explore tool)');
   }
 

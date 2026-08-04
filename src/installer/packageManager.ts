@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { isBinaryAvailable } from './toolResolver';
 
 export type PackageManager = 'npm' | 'yarn' | 'pnpm';
 
@@ -42,11 +43,7 @@ export function isPackageInstalled(workspacePath: string, packageName: string): 
 }
 
 export function isGloballyInstalled(packageName: string): boolean {
-  try {
-    const { execSync } = require('child_process');
-    execSync(`which ${packageName}`, { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  // Delegates to the resolver: `which` is POSIX-only and misses Windows
+  // installs entirely (npm shims are .cmd files under %APPDATA%\npm).
+  return isBinaryAvailable(packageName);
 }

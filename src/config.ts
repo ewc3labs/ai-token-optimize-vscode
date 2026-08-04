@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { setToolPathOverrides } from './installer/toolResolver';
 
 export type Profile = 'full' | 'debug' | 'planning' | 'review' | 'custom';
 export type VerbosityLevel = 'light' | 'full' | 'ultra';
@@ -30,6 +31,8 @@ export interface ExtensionConfig {
   configureMcpOnActivation: boolean;
   codeGraphProjects: CodeGraphProject[];
   telemetryEnabled: boolean;
+  /** Explicit binary locations, e.g. { codegraph: "C:\\tools\\codegraph.cmd" }. */
+  toolPaths: Record<string, string>;
 }
 
 const PROFILE_STRATEGIES: Record<Profile, StrategyState> = {
@@ -54,7 +57,17 @@ export function getConfig(): ExtensionConfig {
     configureMcpOnActivation: config.get<boolean>('configureMcpOnActivation', true),
     codeGraphProjects: config.get<CodeGraphProject[]>('codeGraphProjects', []),
     telemetryEnabled: config.get<boolean>('telemetry.enabled', true),
+    toolPaths: config.get<Record<string, string>>('toolPaths', {}),
   };
+}
+
+/**
+ * Pushes the configured tool paths into the resolver. Called on activation and
+ * whenever settings change, so a user who points the extension at an existing
+ * install does not have to reload the window.
+ */
+export function applyToolPathOverrides(config: ExtensionConfig = getConfig()): void {
+  setToolPathOverrides(config.toolPaths ?? {});
 }
 
 export function getEffectiveStrategies(config: ExtensionConfig): StrategyState {

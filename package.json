@@ -72,6 +72,10 @@
         "title": "AI Token Optimizer: Configure MCP Servers"
       },
       {
+        "command": "aiTokenOptimizer.diagnoseTools",
+        "title": "AI Token Optimizer: Diagnose Tool Detection"
+      },
+      {
         "command": "aiTokenOptimizer.validateAll",
         "title": "AI Token Optimizer: Validate All Strategies"
       },
@@ -221,6 +225,36 @@
                 "default": true
               }
             }
+          }
+        },
+        "aiTokenOptimizer.toolPaths": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Explicit paths to CLI tools, used when they are installed somewhere the extension cannot find automatically (common on Windows, where VS Code often inherits a stale PATH). Accepts a full path to the executable or the folder containing it. Example: `{ \"codegraph\": \"C:\\\\Users\\\\you\\\\AppData\\\\Roaming\\\\npm\\\\codegraph.cmd\", \"rtk\": \"C:\\\\tools\\\\rtk.exe\" }`. Run **AI Token Optimizer: Diagnose Tool Detection** to see what was found and where it looked.",
+          "properties": {
+            "codegraph": {
+              "type": "string",
+              "description": "Path to the codegraph executable (or its folder)."
+            },
+            "rtk": {
+              "type": "string",
+              "description": "Path to the rtk executable (or its folder)."
+            },
+            "sqlite3": {
+              "type": "string",
+              "description": "Path to the sqlite3 CLI (optional — enables the detailed telemetry breakdown)."
+            },
+            "node": {
+              "type": "string",
+              "description": "Path to the node executable used to launch the bundled token-cache MCP server."
+            },
+            "npm": {
+              "type": "string",
+              "description": "Path to the npm executable used for global installs."
+            }
+          },
+          "additionalProperties": {
+            "type": "string"
           }
         },
         "aiTokenOptimizer.telemetry.enabled": {

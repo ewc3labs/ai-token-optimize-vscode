@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import { getConfig } from './config';
+import { applyToolPathOverrides, getConfig } from './config';
 import { showProjectPicker } from './ui/projectPicker';
 import { generateAllInstructions } from './generators';
-import { installAllTools } from './installer';
+import { installAllTools, reportToolDiagnostics } from './installer';
 import { configureMcpServers } from './mcp';
 import { createStatusBar, updateStatusBar, disposeStatusBar } from './ui/statusBar';
 import { showProfilePicker } from './ui/quickPick';
@@ -23,6 +23,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   extensionPath = context.extensionPath;
 
   const config = getConfig();
+  // Before anything shells out to codegraph/rtk — user-specified paths win.
+  applyToolPathOverrides(config);
 
   if (!config.enabled) {
     outputChannel.appendLine('[activate] Extension disabled via settings');
@@ -40,6 +42,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('aiTokenOptimizer.reindex', () => runCodeGraphReindex(outputChannel)),
     vscode.commands.registerCommand('aiTokenOptimizer.validateIndex', () => validateIndex(outputChannel)),
     vscode.commands.registerCommand('aiTokenOptimizer.installTools', () => installAllTools(outputChannel)),
+    vscode.commands.registerCommand('aiTokenOptimizer.diagnoseTools', () => reportToolDiagnostics(outputChannel)),
     vscode.commands.registerCommand('aiTokenOptimizer.manageProjects', () => showProjectPicker(outputChannel)),
     vscode.commands.registerCommand('aiTokenOptimizer.configureMcp', () => configureMcpServers(outputChannel, extensionPath)),
     vscode.commands.registerCommand('aiTokenOptimizer.validateAll', () => validateAllStrategies(outputChannel)),
@@ -176,6 +179,7 @@ async function clearCacheCommand(): Promise<void> {
 
 async function onConfigChanged(): Promise<void> {
   const config = getConfig();
+  applyToolPathOverrides(config);
   if (config.enabled && config.autoApply) {
     try {
       await generateAllInstructions(config);

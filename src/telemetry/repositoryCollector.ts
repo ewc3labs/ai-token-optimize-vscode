@@ -2,7 +2,7 @@
 // Nothing here is estimated — every number comes from codegraph.db (preferred,
 // full breakdown) or from `codegraph status` (fallback, totals only).
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { ranOk, runTool } from '../installer/toolResolver';
 import { CollectContext, MetricSnapshot, MetricsCollector, RepositoryMetrics } from './types';
 import { countBy, isSqliteAvailable, locateDb, query } from './codegraphDb';
 
@@ -135,8 +135,8 @@ export class RepositoryMetricsCollector implements MetricsCollector<RepositoryMe
 
   /** Degraded path: parse totals out of `codegraph status` text. */
   private fromStatus(project: { name: string; absPath: string }): RepositoryMetrics | null {
-    const r = spawnSync('codegraph', ['status'], { cwd: project.absPath, encoding: 'utf-8', timeout: 5000 });
-    if (r.error || r.status !== 0) { return null; }
+    const r = runTool('codegraph', ['status'], { cwd: project.absPath, timeoutMs: 5000 });
+    if (!ranOk(r)) { return null; }
     const out = r.stdout ?? '';
     const files = out.match(/Files:\s*(\d+)/)?.[1];
     const nodes = out.match(/Nodes:\s*(\d+)/)?.[1];

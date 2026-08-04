@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
-import { spawnSync } from 'child_process';
 import { StrategyState } from '../config';
-import { isBinaryAvailable } from '../installer/installer';
+import { combinedOutput, isBinaryAvailable, ranOk, runTool } from '../installer/toolResolver';
 import { getProjectsToIndex } from '../ui/projectPicker';
 import { memoizeTtl } from '../cache/ttlCache';
 import { SemanticCacheStore } from '../cache/store';
@@ -29,8 +28,8 @@ export interface Measurement {
 }
 
 function run(cmd: string, args: string[], cwd?: string, timeoutMs = 5000): { out: string; ok: boolean } {
-  const r = spawnSync(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs, encoding: 'utf-8', cwd });
-  return { out: (r.stdout ?? '') + (r.stderr ?? ''), ok: r.status === 0 && !r.error };
+  const r = runTool(cmd, args, { cwd, timeoutMs });
+  return { out: combinedOutput(r), ok: ranOk(r) };
 }
 
 function primaryWorkspacePath(): string | undefined {
