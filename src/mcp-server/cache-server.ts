@@ -6,7 +6,7 @@ import { SemanticCacheStore, CacheScope } from '../cache/store';
 import { CallLogStore } from '../cache/callLog';
 
 const SERVER_NAME = 'token-cache';
-const SERVER_VERSION = '0.1.0';
+const SERVER_VERSION = '0.1.1';
 const PROTOCOL_VERSION = '2024-11-05';
 
 const workspaceRoot = process.argv[2] || process.cwd();

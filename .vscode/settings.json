@@ -1,0 +1,29 @@
+{
+  "mcp": {
+    "servers": {
+      "context7": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@context7/mcp-server"
+        ],
+        "env": {}
+      },
+      "codegraph": {
+        "command": "codegraph",
+        "args": [
+          "mcp"
+        ],
+        "type": "stdio"
+      },
+      "token-cache": {
+        "command": "node",
+        "args": [
+          "/Users/balachandar.saminathan/.vscode/extensions/ai-token-optimizer.ai-token-optimize-claude-0.1.1/dist/cache-server.js",
+          "/Users/balachandar.saminathan/Bala/claude_projects/ai-token-optimize-vscode"
+        ],
+        "type": "stdio"
+      }
+    }
+  }
+}

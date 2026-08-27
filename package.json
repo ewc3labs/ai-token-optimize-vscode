@@ -1,8 +1,8 @@
 {
-  "name": "ai-token-optimizer",
-  "displayName": "Token Optimizer for Claude & Copilot",
+  "name": "ai-token-optimize-claude",
+  "displayName": "AI Token Optimizer-Vinmi",
   "description": "Automatically reduces token consumption for Claude Code, GitHub Copilot, and Codex by injecting optimized instructions, installing compression tools, and configuring MCP servers.",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "publisher": "ai-token-optimizer",
   "license": "MIT",
   "author": "Vishal Gupta <vishalniit@users.noreply.github.com>",

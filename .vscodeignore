@@ -1,0 +1,6 @@
+.codegraph/**
+.vscode-test/**
+node_modules/**
+.git/**
+*.vsix
+.cavemanrc

@@ -206,7 +206,7 @@ The `⚡ Full (5/5)` item shows the active profile and how many strategies are l
 ### From VSIX
 
 ```bash
-code --install-extension ai-token-optimizer-0.1.0.vsix
+code --install-extension ai-token-optimizer-0.1.1.vsix
 ```
 
 ### From source
@@ -217,7 +217,7 @@ cd ai-token-optimize-vscode
 npm install
 npm run build
 npx vsce package
-code --install-extension ai-token-optimizer-0.1.0.vsix
+code --install-extension ai-token-optimizer-0.1.1.vsix
 ```
 
 ### Tools installed by the extension
