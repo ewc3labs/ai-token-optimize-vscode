@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { MARKER_START, MARKER_END, MARKER_COMMENT } from '../constants';
+import { mergeContent } from './merge';
 import { ExtensionConfig, getEffectiveStrategies, StrategyState } from '../config';
 
 export interface GeneratorResult {
@@ -49,27 +49,7 @@ export abstract class BaseGenerator {
   }
 
   protected mergeContent(existing: string, newOptimizationBlock: string): string {
-    const startIdx = existing.indexOf(MARKER_START);
-    const endIdx = existing.indexOf(MARKER_END);
-
-    const optimizationSection = this.extractMarkedSection(newOptimizationBlock);
-
-    if (startIdx !== -1 && endIdx !== -1) {
-      const before = existing.substring(0, startIdx);
-      const after = existing.substring(endIdx + MARKER_END.length);
-      return before + optimizationSection + after;
-    }
-
-    return existing.trimEnd() + '\n\n' + optimizationSection + '\n';
-  }
-
-  private extractMarkedSection(content: string): string {
-    const startIdx = content.indexOf(MARKER_START);
-    const endIdx = content.indexOf(MARKER_END);
-    if (startIdx !== -1 && endIdx !== -1) {
-      return content.substring(startIdx, endIdx + MARKER_END.length);
-    }
-    return `${MARKER_START}\n${MARKER_COMMENT}\n${content}\n${MARKER_END}`;
+    return mergeContent(existing, newOptimizationBlock);
   }
 
   protected buildSections(strategies: StrategyState, config: ExtensionConfig): string[] {

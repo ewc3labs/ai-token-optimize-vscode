@@ -1,5 +1,13 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { getConfig } from './config';
+import { hasAuthoredContent } from './generators/merge';
+import {
+  COPILOT_INSTRUCTIONS_PATH,
+  CLAUDE_INSTRUCTIONS_PATH,
+  CODEX_INSTRUCTIONS_PATH,
+} from './constants';
 import { showProjectPicker } from './ui/projectPicker';
 import { generateAllInstructions } from './generators';
 import { installAllTools } from './installer';
@@ -152,13 +160,69 @@ async function toggleAllCommand(): Promise<void> {
 
 async function regenerateCommand(): Promise<void> {
   const config = getConfig();
-  // Force regenerate by temporarily disabling preserve
-  const overrideConfig = { ...config, preserveExistingInstructions: false };
-  const results = await generateAllInstructions(overrideConfig);
-  const count = results.filter(r => r.created || r.updated).length;
+
+  // Regenerate the MANAGED BLOCK, honouring preserveExistingInstructions.
+  //
+  // This used to force that flag off, so the one command whose name sounds
+  // harmless was the one path that discarded content the extension never
+  // wrote. A repo that tracks .github/copilot-instructions.md in git keeps its
+  // own guidance above the markers — including, in at least one case, the
+  // paragraph telling a fresh clone that the tools named in the generated
+  // block are optional. Overwriting that silently is a data loss, and the
+  // setting exists precisely to say whether it is wanted.
+  const overwriting = !config.preserveExistingInstructions;
+  if (overwriting && !(await confirmWholesaleOverwrite())) {
+    return;
+  }
+
+  const results = await generateAllInstructions(config);
+  const changed = results.filter(r => r.created || r.updated).length;
+  const unchanged = results.filter(r => r.skipped).length;
   vscode.window.showInformationMessage(
-    `AI Token Optimizer: Regenerated ${count} instruction files`
+    `AI Token Optimizer: Regenerated ${changed} instruction file${changed === 1 ? '' : 's'}` +
+      (unchanged > 0 ? ` (${unchanged} already current)` : '') +
+      (overwriting ? ' — whole-file overwrite' : '')
   );
+}
+
+/**
+ * `preserveExistingInstructions: false` means every instruction file is
+ * rewritten wholesale. Name the files that would lose authored content before
+ * doing it, rather than reporting the count afterwards.
+ */
+async function confirmWholesaleOverwrite(): Promise<boolean> {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    return true;
+  }
+
+  const atRisk = [
+    COPILOT_INSTRUCTIONS_PATH,
+    CLAUDE_INSTRUCTIONS_PATH,
+    CODEX_INSTRUCTIONS_PATH,
+  ].filter(relativePath => {
+    const absolutePath = path.join(folders[0].uri.fsPath, relativePath);
+    if (!fs.existsSync(absolutePath)) {
+      return false;
+    }
+    try {
+      return hasAuthoredContent(fs.readFileSync(absolutePath, 'utf-8'));
+    } catch {
+      return false;
+    }
+  });
+
+  if (atRisk.length === 0) {
+    return true;
+  }
+
+  const choice = await vscode.window.showWarningMessage(
+    'AI Token Optimizer: preserveExistingInstructions is off, so these files will be overwritten ' +
+      `whole, losing anything written outside the markers:\n\n${atRisk.join('\n')}`,
+    { modal: true },
+    'Overwrite'
+  );
+  return choice === 'Overwrite';
 }
 
 async function clearCacheCommand(): Promise<void> {
