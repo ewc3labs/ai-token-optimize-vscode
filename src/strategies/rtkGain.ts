@@ -8,6 +8,7 @@
 // unstable, dynamically-truncated table, the same fragility that made the
 // old synthetic benchmark unreliable. Skipped for now.
 import { spawnSync } from 'child_process';
+import { runTool } from '../installer/platform';
 
 export type RtkGainStatus = 'measured' | 'no-data' | 'error';
 
@@ -61,7 +62,7 @@ export function parseRtkGainOutput(jsonText: string): RtkGainResult {
 
 /** Thin I/O wrapper — shells out to the real rtk binary and delegates parsing. */
 export function getRtkGain(cwd: string): RtkGainResult {
-  const result = spawnSync('rtk', ['gain', '--format', 'json', '--all', '--project'], {
+  const result = runTool('rtk', ['gain', '--format', 'json', '--all', '--project'], {
     cwd,
     encoding: 'utf-8',
     timeout: 5000,

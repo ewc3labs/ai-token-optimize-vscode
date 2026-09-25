@@ -5,6 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { runTool } from '../installer/platform';
 
 /** Unit-separator record/field delimiters — safe against `|`/tab in data. */
 const FS = '\x1f';
@@ -30,7 +31,7 @@ export function locateDb(projectPath: string): CodeGraphDbLocation | null {
 /** Whether the `sqlite3` CLI is invocable at all. */
 export function isSqliteAvailable(): boolean {
   try {
-    const r = spawnSync('sqlite3', ['-version'], { timeout: 3000, stdio: ['ignore', 'ignore', 'ignore'] });
+    const r = runTool('sqlite3', ['-version'], { timeout: 3000, stdio: ['ignore', 'ignore', 'ignore'], encoding: 'utf-8' });
     return r.status === 0 && !r.error;
   } catch {
     return false;
@@ -45,7 +46,7 @@ export function isSqliteAvailable(): boolean {
  */
 export function query(dbPath: string, sql: string, timeoutMs = 5000): string[][] | null {
   const uri = `file:${dbPath}?immutable=1`;
-  const r = spawnSync(
+  const r = runTool(
     'sqlite3',
     ['-readonly', '-batch', '-noheader', '-nullvalue', '', '-separator', FS, '-newline', RS, uri, sql],
     { encoding: 'utf-8', timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'] },

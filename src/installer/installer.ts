@@ -5,7 +5,7 @@ import * as os from 'os';
 import { execSync, spawnSync } from 'child_process';
 import { TOOLS_TO_INSTALL, ToolInstallEntry } from '../constants';
 import { memoizeTtl } from '../cache/ttlCache';
-import { lookupCommand, needsShell, canRunShellScript } from './platform';
+import { lookupCommand, canRunShellScript, runTool } from './platform';
 
 export interface InstallResult {
   packageName: string;
@@ -99,15 +99,12 @@ async function installTool(tool: ToolInstallEntry, outputChannel: vscode.OutputC
 
 function installViaNpm(binaryName: string, npmPackage: string, outputChannel: vscode.OutputChannel): InstallResult {
   outputChannel.appendLine(`[installer] Running: npm install -g ${npmPackage}`);
-  // On Windows `npm` is `npm.cmd`, which Node 20+ refuses to execute without a
-  // shell — unshelled, this is ENOENT on a machine where npm works everywhere
-  // else. The package name comes from our own TOOLS_TO_INSTALL table, never
-  // from user input, so shell concatenation (Node DEP0190) is safe here.
-  const result = spawnSync('npm', ['install', '-g', npmPackage], {
+  // `npm` is `npm.cmd` on Windows, which Node 20+ will not execute unshelled:
+  // runTool decides that per platform (see ./platform).
+  const result = runTool('npm', ['install', '-g', npmPackage], {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 120000,
     encoding: 'utf-8',
-    shell: needsShell(),
   });
   if (result.status === 0) {
     outputChannel.appendLine(`[installer] ✓ ${binaryName} installed`);
@@ -189,11 +186,10 @@ function runPostInstall(tool: ToolInstallEntry, outputChannel: vscode.OutputChan
   outputChannel.appendLine(`[installer] Post-install: ${cmd} ${args.join(' ')}`);
   // Same .cmd/.ps1 shim problem as npm: the tool we just installed may be a
   // shim rather than an executable.
-  const result = spawnSync(cmd, args, {
+  const result = runTool(cmd, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 30000,
     encoding: 'utf-8',
-    shell: needsShell(),
     env: { ...process.env },
   });
   if (result.status === 0) {
@@ -225,11 +221,10 @@ async function offerWireCodegraphAgents(outputChannel: vscode.OutputChannel): Pr
   );
   if (choice === 'Wire Agents') {
     outputChannel.appendLine('[installer] Running: codegraph install --yes');
-    const result = spawnSync('codegraph', ['install', '--yes'], {
+    const result = runTool('codegraph', ['install', '--yes'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 30000,
       encoding: 'utf-8',
-      shell: needsShell(),
     });
     if (result.status === 0) {
       outputChannel.appendLine('[installer] ✓ CodeGraph agent wiring complete');

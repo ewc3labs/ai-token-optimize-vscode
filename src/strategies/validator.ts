@@ -7,6 +7,7 @@ import { isBinaryAvailable } from '../installer/installer';
 import { getProjectsToIndex } from '../ui/projectPicker';
 import { COPILOT_INSTRUCTIONS_PATH, CLAUDE_INSTRUCTIONS_PATH, CODEX_INSTRUCTIONS_PATH, MARKER_START, MCP_CACHE_SERVER_NAME } from '../constants';
 import { SemanticCacheStore, CACHE_DIR, CACHE_FILE } from '../cache/store';
+import { runTool } from '../installer/platform';
 
 // ─── result types ────────────────────────────────────────────────────────────
 
@@ -22,7 +23,8 @@ interface CategoryResult {
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 function runCmd(cmd: string, args: string[], cwd?: string): string {
-  const r = spawnSync(cmd, args, {
+  // The tools validated here (codegraph, rtk) are .cmd shims on Windows.
+  const r = runTool(cmd, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 10000,
     encoding: 'utf-8',

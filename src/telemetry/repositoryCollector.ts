@@ -5,6 +5,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { CollectContext, MetricSnapshot, MetricsCollector, RepositoryMetrics } from './types';
 import { countBy, isSqliteAvailable, locateDb, query } from './codegraphDb';
+import { runTool } from '../installer/platform';
 
 /**
  * Maps CodeGraph node kinds onto the prompt's requested categories. CodeGraph
@@ -135,7 +136,7 @@ export class RepositoryMetricsCollector implements MetricsCollector<RepositoryMe
 
   /** Degraded path: parse totals out of `codegraph status` text. */
   private fromStatus(project: { name: string; absPath: string }): RepositoryMetrics | null {
-    const r = spawnSync('codegraph', ['status'], { cwd: project.absPath, encoding: 'utf-8', timeout: 5000 });
+    const r = runTool('codegraph', ['status'], { cwd: project.absPath, encoding: 'utf-8', timeout: 5000 });
     if (r.error || r.status !== 0) { return null; }
     const out = r.stdout ?? '';
     const files = out.match(/Files:\s*(\d+)/)?.[1];

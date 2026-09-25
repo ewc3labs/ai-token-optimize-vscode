@@ -7,6 +7,7 @@ import { memoizeTtl } from '../cache/ttlCache';
 import { SemanticCacheStore } from '../cache/store';
 import { CallLogStore } from '../cache/callLog';
 import { getRtkGain } from './rtkGain';
+import { runTool } from '../installer/platform';
 
 const MEASURE_TTL_MS = 5 * 60_000;
 
@@ -29,7 +30,8 @@ export interface Measurement {
 }
 
 function run(cmd: string, args: string[], cwd?: string, timeoutMs = 5000): { out: string; ok: boolean } {
-  const r = spawnSync(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs, encoding: 'utf-8', cwd });
+  // runTool, not spawnSync: `codegraph` is a .cmd shim on Windows (see installer/platform).
+  const r = runTool(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs, encoding: 'utf-8', cwd });
   return { out: (r.stdout ?? '') + (r.stderr ?? ''), ok: r.status === 0 && !r.error };
 }
 

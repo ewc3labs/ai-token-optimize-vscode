@@ -1,3 +1,5 @@
+import { spawnSync, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from 'child_process';
+
 /**
  * Platform differences that decide whether a child process runs at all.
  *
@@ -34,6 +36,50 @@ export function lookupCommand(binary: string, platform: NodeJS.Platform = proces
  */
 export function needsShell(platform: NodeJS.Platform = process.platform): boolean {
   return platform === 'win32';
+}
+
+/**
+ * Quote one argument for the Windows shell.
+ *
+ * `shell: true` concatenates arguments instead of escaping them (Node
+ * DEP0190), so a path with a space — which on Windows is most of them —
+ * arrives as two arguments. Quoting is therefore part of using a shell at all,
+ * not an optional hardening step.
+ */
+export function quoteWindowsArg(arg: string): string {
+  if (arg === '') {
+    return '""';
+  }
+  // Quote anything that is not plainly inert. Whitespace is the obvious case,
+  // but `cmd.exe` also acts on & | < > ^ ( ) — a JavaScript snippet or a glob
+  // reaches the child mangled, or not at all, without quotes.
+  return /^[A-Za-z0-9_.:\\/=@+-]+$/.test(arg) ? arg : `"${arg.replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * Spawn a tool the extension installed, on any platform.
+ *
+ * Every tool this extension installs arrives on Windows as a `.cmd` or `.ps1`
+ * shim (`npm`, `codegraph`), and Node 20+ will not execute those without a
+ * shell. Each call site that spawns one has to make the same decision, which
+ * is exactly the kind of rule that gets fixed in one place and left wrong in
+ * the other four — so it lives here and the call sites ask.
+ *
+ * `execSync` callers do not need this: it always runs through a shell.
+ */
+export function runTool(
+  command: string,
+  args: string[],
+  options: SpawnSyncOptionsWithStringEncoding
+): SpawnSyncReturns<string> {
+  const shell = needsShell();
+  if (!shell) {
+    return spawnSync(command, args, { ...options, shell });
+  }
+  // The command needs quoting as much as the arguments do: with a shell, an
+  // absolute path such as C:\Program Files\nodejs\node.exe is split at the
+  // space and cmd reports `'C:\Program' is not recognized`.
+  return spawnSync(quoteWindowsArg(command), args.map(quoteWindowsArg), { ...options, shell });
 }
 
 /**
