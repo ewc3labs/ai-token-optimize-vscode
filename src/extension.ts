@@ -8,6 +8,14 @@ import {
   CLAUDE_INSTRUCTIONS_PATH,
   CODEX_INSTRUCTIONS_PATH,
 } from './constants';
+import { TargetTool } from './config';
+
+/** The file each target tool reads, so the two lists cannot drift apart. */
+const INSTRUCTION_PATH_BY_TOOL: Record<TargetTool, string> = {
+  copilot: COPILOT_INSTRUCTIONS_PATH,
+  claude: CLAUDE_INSTRUCTIONS_PATH,
+  codex: CODEX_INSTRUCTIONS_PATH,
+};
 import { showProjectPicker } from './ui/projectPicker';
 import { generateAllInstructions } from './generators';
 import { installAllTools } from './installer';
@@ -171,7 +179,7 @@ async function regenerateCommand(): Promise<void> {
   // block are optional. Overwriting that silently is a data loss, and the
   // setting exists precisely to say whether it is wanted.
   const overwriting = !config.preserveExistingInstructions;
-  if (overwriting && !(await confirmWholesaleOverwrite())) {
+  if (overwriting && !(await confirmWholesaleOverwrite(config.targetTools))) {
     return;
   }
 
@@ -190,17 +198,19 @@ async function regenerateCommand(): Promise<void> {
  * rewritten wholesale. Name the files that would lose authored content before
  * doing it, rather than reporting the count afterwards.
  */
-async function confirmWholesaleOverwrite(): Promise<boolean> {
+async function confirmWholesaleOverwrite(targetTools: TargetTool[]): Promise<boolean> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
     return true;
   }
 
-  const atRisk = [
-    COPILOT_INSTRUCTIONS_PATH,
-    CLAUDE_INSTRUCTIONS_PATH,
-    CODEX_INSTRUCTIONS_PATH,
-  ].filter(relativePath => {
+  // Only the tools this run will actually write. With targetTools set to
+  // ["copilot"], an authored CLAUDE.md is not at risk, and warning about it
+  // would ask for confirmation to protect a file the command never touches.
+  const atRisk = targetTools
+    .map(tool => INSTRUCTION_PATH_BY_TOOL[tool])
+    .filter((relativePath): relativePath is string => Boolean(relativePath))
+    .filter(relativePath => {
     const absolutePath = path.join(folders[0].uri.fsPath, relativePath);
     if (!fs.existsSync(absolutePath)) {
       return false;
