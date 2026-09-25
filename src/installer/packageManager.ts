@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { lookupCommand } from './platform';
 
 export type PackageManager = 'npm' | 'yarn' | 'pnpm';
 
@@ -44,7 +45,8 @@ export function isPackageInstalled(workspacePath: string, packageName: string): 
 export function isGloballyInstalled(packageName: string): boolean {
   try {
     const { execSync } = require('child_process');
-    execSync(`which ${packageName}`, { stdio: 'ignore' });
+    // `which` is POSIX-only; see ./platform for why this fails closed on Windows.
+    execSync(lookupCommand(packageName), { stdio: 'ignore' });
     return true;
   } catch {
     return false;

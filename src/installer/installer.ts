@@ -5,6 +5,7 @@ import * as os from 'os';
 import { execSync, spawnSync } from 'child_process';
 import { TOOLS_TO_INSTALL, ToolInstallEntry } from '../constants';
 import { memoizeTtl } from '../cache/ttlCache';
+import { lookupCommand, needsShell, canRunShellScript } from './platform';
 
 export interface InstallResult {
   packageName: string;
@@ -13,12 +14,17 @@ export interface InstallResult {
   error?: string;
 }
 
-// Each check is a blocking `which` (up to 3s) — memoized so validators and
+// Each check is a blocking lookup (up to 3s) — memoized so validators and
 // dashboard refreshes don't repeatedly shell out for the same binary.
+//
+// `which` does not exist on Windows; the lookup command is chosen per platform
+// (see ./platform). Getting this wrong fails closed: the command throws, the
+// catch reports "not installed", and every install path downstream runs again
+// on a machine where the tool is already on PATH.
 export function isBinaryAvailable(bin: string): boolean {
   return memoizeTtl(`which:${bin}`, 60_000, () => {
     try {
-      execSync(`which ${bin}`, { stdio: 'ignore', timeout: 3000 });
+      execSync(lookupCommand(bin), { stdio: 'ignore', timeout: 3000 });
       return true;
     } catch {
       return false;
@@ -93,10 +99,15 @@ async function installTool(tool: ToolInstallEntry, outputChannel: vscode.OutputC
 
 function installViaNpm(binaryName: string, npmPackage: string, outputChannel: vscode.OutputChannel): InstallResult {
   outputChannel.appendLine(`[installer] Running: npm install -g ${npmPackage}`);
+  // On Windows `npm` is `npm.cmd`, which Node 20+ refuses to execute without a
+  // shell — unshelled, this is ENOENT on a machine where npm works everywhere
+  // else. The package name comes from our own TOOLS_TO_INSTALL table, never
+  // from user input, so shell concatenation (Node DEP0190) is safe here.
   const result = spawnSync('npm', ['install', '-g', npmPackage], {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 120000,
     encoding: 'utf-8',
+    shell: needsShell(),
   });
   if (result.status === 0) {
     outputChannel.appendLine(`[installer] ✓ ${binaryName} installed`);
@@ -129,7 +140,20 @@ function installViaBrewOrShell(tool: ToolInstallEntry, outputChannel: vscode.Out
     outputChannel.appendLine(`[installer] brew failed, trying shell script: ${brewErr}`);
   }
 
-  // Fall back to shell script
+  // Fall back to shell script — where a POSIX shell exists.
+  //
+  // A stock Windows box has no `sh`, so this spawn is ENOENT before the URL is
+  // ever fetched. Saying so, and pointing at something the user can actually
+  // run, beats reporting a failure they cannot act on.
+  if (tool.shellScriptUrl && !canRunShellScript()) {
+    const err = `${tool.name} has no Windows installer yet: its install methods are Homebrew (macOS) and a POSIX shell script, and this machine has neither.`;
+    outputChannel.appendLine(`[installer] ✗ ${err}`);
+    vscode.window.showErrorMessage(
+      `AI Token Optimizer: ${err} Install ${tool.name} manually and reload the window.`
+    );
+    return { packageName: tool.name, installed: false, alreadyInstalled: false, error: err };
+  }
+
   if (tool.shellScriptUrl) {
     outputChannel.appendLine(`[installer] Running: curl -fsSL ${tool.shellScriptUrl} | sh`);
     const result = spawnSync('sh', ['-c', `curl -fsSL ${tool.shellScriptUrl} | sh`], {
@@ -163,10 +187,13 @@ function runPostInstall(tool: ToolInstallEntry, outputChannel: vscode.OutputChan
   if (!tool.postInstallArgs || tool.postInstallArgs.length === 0) { return; }
   const [cmd, ...args] = [tool.name, ...tool.postInstallArgs];
   outputChannel.appendLine(`[installer] Post-install: ${cmd} ${args.join(' ')}`);
+  // Same .cmd/.ps1 shim problem as npm: the tool we just installed may be a
+  // shim rather than an executable.
   const result = spawnSync(cmd, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 30000,
     encoding: 'utf-8',
+    shell: needsShell(),
     env: { ...process.env },
   });
   if (result.status === 0) {
@@ -202,6 +229,7 @@ async function offerWireCodegraphAgents(outputChannel: vscode.OutputChannel): Pr
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 30000,
       encoding: 'utf-8',
+      shell: needsShell(),
     });
     if (result.status === 0) {
       outputChannel.appendLine('[installer] ✓ CodeGraph agent wiring complete');
